@@ -48,6 +48,7 @@ if [ "$OS" = "Darwin" ]; then
   URL="$(pick_asset "mac-${MAC_ARCH}.*\\.zip$")"
   [ -n "$URL" ] || URL="$(pick_asset 'mac.*\.zip$')"
   [ -n "$URL" ] || die "بسته‌ی macOS در این نسخه پیدا نشد."
+  if [ "${FSA_PRINT_ONLY:-}" = "1" ]; then say "FSA_URL=$URL"; exit 0; fi
 
   say "دانلود $(basename "$URL")…"
   curl -fL --progress-bar "$URL" -o "$TMP_DIR/app.zip"
@@ -76,10 +77,11 @@ if [ "$OS" = "Darwin" ]; then
 fi
 
 # ---------- Linux ----------
-URL="$(pick_asset 'linux.*\.AppImage$')"
-[ -n "$URL" ] || URL="$(pick_asset '\.AppImage$')"
-if [ -n "$URL" ]; then
+URL="$(pick_asset "linux-${ARCH_TOKEN}.*\.AppImage$")"
+[ -n "$URL" ] || URL="$(pick_asset "linux-${ARCH_TOKEN}.*\.deb$")"
+if [ -n "$URL" ] && printf '%s' "$URL" | grep -qi '\.AppImage$'; then
   INSTALL_DIR="${FSA_DIR:-$HOME/.local/bin}"
+  if [ "${FSA_PRINT_ONLY:-}" = "1" ]; then say "FSA_URL=$URL"; exit 0; fi
   say "دانلود $(basename "$URL")…"
   mkdir -p "$INSTALL_DIR"
   curl -fL --progress-bar "$URL" -o "$TMP_DIR/app.AppImage"
@@ -120,15 +122,18 @@ EOF
   exit 0
 fi
 
-DEB_URL="$(pick_asset 'linux.*\.deb$')"
-[ -n "$DEB_URL" ] || DEB_URL="$(pick_asset '\.deb$')"
+if [ -z "$URL" ]; then
+  die "بسته‌ی مناسب معماری $ARCH_TOKEN برای لینوکس پیدا نشد. از صفحه‌ی نسخه‌ها به‌صورت دستی دانلود کنید."
+fi
+DEB_URL="$URL"
 [ -n "$DEB_URL" ] || die "بسته‌ی لینوکس در این نسخه پیدا نشد."
+if [ "${FSA_PRINT_ONLY:-}" = "1" ]; then say "FSA_URL=$DEB_URL"; exit 0; fi
 say "دانلود $(basename "$DEB_URL")…"
 curl -fL --progress-bar "$DEB_URL" -o "$TMP_DIR/app.deb"
 if command -v apt-get >/dev/null 2>&1; then
   say "نصب بسته (ممکن است رمز sudo خواسته شود)…"
   sudo apt-get install -y "$TMP_DIR/app.deb"
 else
-  die "AppImage پیدا نشد. بسته‌ی deb را دستی نصب کنید: $TMP_DIR/app.deb"
+  die "نصب خودکار ممکن نشد (apt در دسترس نیست). بسته‌ی deb را دستی نصب کنید: $TMP_DIR/app.deb"
 fi
 say "نصب کامل شد. برنامه را از منوی برنامه‌ها با نام «$APP_NAME» باز کنید."
