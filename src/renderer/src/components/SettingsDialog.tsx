@@ -83,6 +83,12 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
 
   const provider = settings.provider
 
+  // Never carry a partially typed key over to another provider.
+  useEffect(() => {
+    setKeyDraft('')
+    setError(null)
+  }, [provider])
+
   useEffect(() => {
     if (open) void refreshSecrets()
     else setDevice(null)
