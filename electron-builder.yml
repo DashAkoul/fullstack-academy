@@ -1,20 +1,67 @@
 appId: com.fullstackacademy.desktop
 productName: FullStack Academy
+copyright: Copyright © 2026 FullStack Academy contributors
+
 directories:
   output: release
   buildResources: build
+
 files:
   - out/**/*
   - package.json
+  - LICENSE
+
 asar: true
+compression: maximum
+artifactName: FullStackAcademy-${version}-${os}-${arch}.${ext}
+
 win:
-  target: [nsis]
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
 nsis:
   oneClick: false
+  perMachine: false
+  allowElevation: true
   allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: FullStack Academy
+  artifactName: FullStackAcademy-${version}-windows-setup.${ext}
+
+portable:
+  artifactName: FullStackAcademy-${version}-windows-portable.${ext}
+
 mac:
-  target: [dmg]
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
   category: public.app-category.education
+  identity: null
+  hardenedRuntime: false
+  darkModeSupport: true
+
+dmg:
+  artifactName: FullStackAcademy-${version}-mac-${arch}.${ext}
+
 linux:
-  target: [AppImage, deb]
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
   category: Education
+  maintainer: DashAkoul <AkoulDash@outlook.com>
+  synopsis: Persian full-stack learning path with AI code review
+  description: An offline-first desktop academy that guides beginners to professional full-stack developers with Persian lessons, real-world exercises and AI code review.
+
+appImage:
+  artifactName: FullStackAcademy-${version}-linux-${arch}.${ext}
+
+deb:
+  artifactName: FullStackAcademy-${version}-linux-${arch}.${ext}

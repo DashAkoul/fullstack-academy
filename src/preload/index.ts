@@ -15,19 +15,20 @@ const api: AcademyBridge = {
   },
   secrets: {
     status: () => call('secrets:status'),
-    setApiKey: (provider, key) => call('secrets:setApiKey', provider, key),
-    setGithubToken: (token) => call('secrets:setGithubToken', token)
+    setApiKey: (provider, key) => call('secrets:setApiKey', provider, key)
   },
   github: {
-    startDeviceFlow: (clientId) => call('github:startDeviceFlow', clientId),
-    pollDeviceFlow: (clientId, deviceCode) => call('github:pollDeviceFlow', clientId, deviceCode),
     fetchRepo: (ref) => call('github:fetchRepo', ref)
   },
   ai: {
-    complete: (req) => call('ai:complete', req)
+    complete: (req) => call('ai:complete', req),
+    listModels: (req) => call('ai:listModels', req)
   },
   shell: { openExternal: (url) => call('shell:openExternal', url) },
-  app: { info: () => call('app:info') }
+  app: {
+    info: () => call('app:info'),
+    checkUpdate: () => call('app:checkUpdate')
+  }
 }
 
 contextBridge.exposeInMainWorld('academy', api)

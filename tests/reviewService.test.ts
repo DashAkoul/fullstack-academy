@@ -48,8 +48,7 @@ const settings: Settings = {
   provider: 'gemini',
   models: { gemini: 'gemini-2.5-flash', openai: 'gpt-4.1-mini', anthropic: 'claude-sonnet-4-5' },
   baseUrl: '',
-  theme: 'dark',
-  githubClientId: ''
+  theme: 'dark'
 }
 
 const reviewJson = JSON.stringify({

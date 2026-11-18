@@ -1,7 +1,7 @@
 {
   "name": "fullstack-academy",
-  "version": "0.1.0",
-  "description": "Interactive desktop academy for becoming a full-stack developer",
+  "version": "1.0.0",
+  "description": "FullStack Academy — a Persian, offline-first desktop learning path from web basics to full-stack engineering with AI code review.",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -13,8 +13,12 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux"
   },
-  "author": "FullStack Academy",
-  "license": "MIT",
+  "author": {
+    "name": "DashAkoul",
+    "email": "AkoulDash@outlook.com",
+    "url": "https://github.com/DashAkoul"
+  },
+  "license": "AGPL-3.0-or-later",
   "dependencies": {},
   "devDependencies": {
     "@fontsource/vazirmatn": "^5.3.0",
@@ -41,5 +45,16 @@
     "zod": "^4.6.7",
     "zustand": "^5.1.0"
   },
-  "productName": "FullStack Academy"
+  "productName": "FullStack Academy",
+  "homepage": "https://github.com/DashAkoul/fullstack-academy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DashAkoul/fullstack-academy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DashAkoul/fullstack-academy/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }

@@ -40,11 +40,10 @@ export async function removeDoc(key: string): Promise<void> {
   await fs.rm(keyPath(key), { force: true })
 }
 
-// ---------- Secrets (API keys, GitHub token) — never exposed to the renderer ----------
+// ---------- Secrets (AI API keys) — never exposed to the renderer ----------
 
 interface SecretsFile {
   apiKeys: Partial<Record<AIProvider, string>>
-  github?: { token: string; login: string; method: 'oauth' | 'pat' }
 }
 
 type StoredSecrets = { encrypted: boolean; payload: string }
@@ -97,13 +96,7 @@ export async function secretsStatus(): Promise<SecretsStatus> {
     AIProvider,
     boolean
   >
-  return {
-    apiKeys,
-    github: s.github
-      ? { connected: true, login: s.github.login, method: s.github.method }
-      : { connected: false },
-    encrypted: await canEncrypt()
-  }
+  return { apiKeys, encrypted: await canEncrypt() }
 }
 
 export async function getApiKey(provider: AIProvider): Promise<string | undefined> {
@@ -117,15 +110,4 @@ export async function setApiKey(provider: AIProvider, key: string | null): Promi
   if (key && key.trim()) apiKeys[provider] = key.trim()
   else delete apiKeys[provider]
   await saveSecrets({ ...s, apiKeys })
-}
-
-export async function getGithubToken(): Promise<string | undefined> {
-  return (await loadSecrets()).github?.token
-}
-
-export async function setGithub(
-  value: { token: string; login: string; method: 'oauth' | 'pat' } | null
-): Promise<void> {
-  const s = await loadSecrets()
-  await saveSecrets({ ...s, github: value ?? undefined })
 }

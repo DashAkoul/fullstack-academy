@@ -227,11 +227,27 @@ export function ReviewTab({ lesson, onOpenSettings }: { lesson: Lesson; onOpenSe
               مخزن تمرین در GitHub
             </h2>
             <p className="mt-1 text-xs leading-6 text-[var(--text-2)]">
-              کد تمرین را در یک مخزن عمومی یا خصوصی پوش کنید، سپس آدرس آن را اینجا بگذارید. کد فقط برای
-              بازبینی به سرویس هوش مصنوعی انتخابی شما ارسال می‌شود.
+              کد تمرین را در یک مخزن <strong>عمومی</strong> در GitHub پوش کنید و آدرس آن را اینجا بگذارید.
+              کد فقط برای بازبینی به سرویس هوش مصنوعی انتخابی شما ارسال می‌شود.
             </p>
           </div>
           <Badge tone={completed ? 'success' : 'neutral'}>{completed ? 'تکمیل‌شده' : 'در انتظار'}</Badge>
+        </div>
+
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[0.7rem] text-[var(--text-3)]">
+          <span>مخزن ندارید؟</span>
+          <button
+            className="btn btn-ghost px-1.5 py-0.5 text-[0.7rem] text-[var(--accent)]"
+            onClick={() =>
+              void window.academy.shell.openExternal(
+                `https://github.com/new?name=${encodeURIComponent(lesson.exercise.repoName)}&description=${encodeURIComponent(lesson.exercise.title)}`
+              )
+            }
+          >
+            ساخت مخزن جدید در GitHub
+          </button>
+          <span>•</span>
+          <span>visibility را Public بگذارید</span>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -306,7 +322,7 @@ export function ReviewTab({ lesson, onOpenSettings }: { lesson: Lesson; onOpenSe
       {lessonProgress.attempts.length === 0 && !busy && (
         <section className="grid gap-3 sm:grid-cols-3">
           {[
-            { n: '۱', title: 'مخزن بسازید', body: `در GitHub یک مخزن با نام ${lesson.exercise.repoName} بسازید.` },
+            { n: '۱', title: 'مخزن عمومی بسازید', body: `در GitHub یک مخزن Public با نام ${lesson.exercise.repoName} بسازید.` },
             { n: '۲', title: 'کد را پوش کنید', body: 'تمرین را کامل کنید و با پیام commit معنادار پوش کنید.' },
             { n: '۳', title: 'بررسی بگیرید', body: 'آدرس مخزن را بالا بگذارید؛ بازخورد و معیارهای تأییدنشده را ببینید.' }
           ].map((step) => (

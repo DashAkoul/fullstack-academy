@@ -1,21 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
-  Copy,
-  GitBranch,
+  Database,
+  Download,
   KeyRound,
-  Loader2,
   Lock,
-  LogOut,
   Palette,
+  RefreshCw,
   RotateCcw,
-  ShieldCheck,
   Sparkles,
   Trash2,
   TriangleAlert
 } from 'lucide-react'
-import type { AIProvider, DeviceCodeResponse } from '@shared/types'
+import type { AIProvider, ModelInfo, UpdateInfo } from '@shared/types'
 import { AI_PROVIDERS, DEFAULT_MODELS } from '@shared/types'
+import { REPO_URL, RELEASES_URL } from '@shared/appConfig'
 import { useApp } from '@/store/useApp'
 import { useSecrets } from '@/store/useSecrets'
 import { Badge, Callout, Modal, Spinner } from './ui'
@@ -23,17 +22,17 @@ import { Badge, Callout, Modal, Spinner } from './ui'
 const PROVIDER_INFO: Record<AIProvider, { label: string; hint: string; keyUrl: string }> = {
   gemini: {
     label: 'Google Gemini',
-    hint: 'کلید را از Google AI Studio بسازید. مدل پیشنهادی: gemini-2.5-flash',
+    hint: 'کلید را از Google AI Studio بسازید. پس از ذخیره، فهرست مدل‌ها به‌صورت خودکار بارگذاری می‌شود.',
     keyUrl: 'https://aistudio.google.com/app/apikey'
   },
   openai: {
     label: 'OpenAI',
-    hint: 'کلید را از پنل OpenAI بسازید. امکان تنظیم Base URL سازگار (پروکسی/OpenRouter) هم هست.',
+    hint: 'کلید را از پنل OpenAI بسازید. امکان استفاده از Base URL سازگار (پروکسی یا سرور داخلی) هم هست.',
     keyUrl: 'https://platform.openai.com/api-keys'
   },
   anthropic: {
     label: 'Anthropic',
-    hint: 'کلید را از Anthropic Console بسازید. مدل پیشنهادی: claude-sonnet-4-5',
+    hint: 'کلید را از Anthropic Console بسازید. فهرست مدل‌های موجود خودکار خوانده می‌شود.',
     keyUrl: 'https://console.anthropic.com/settings/keys'
   }
 }
@@ -70,81 +69,77 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const secrets = useSecrets((s) => s.status)
   const refreshSecrets = useSecrets((s) => s.refresh)
 
+  const provider = settings.provider
+
   const [keyDraft, setKeyDraft] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [patDraft, setPatDraft] = useState('')
+
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [manualModel, setManualModel] = useState(false)
+
+  const [appVersion, setAppVersion] = useState('')
   const [dataPath, setDataPath] = useState('')
-  const [device, setDevice] = useState<DeviceCodeResponse | null>(null)
-  const [deviceError, setDeviceError] = useState<string | null>(null)
+  const [update, setUpdate] = useState<UpdateInfo | null>(null)
+  const [updateLoading, setUpdateLoading] = useState(false)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+
   const [confirmReset, setConfirmReset] = useState(false)
-  const cancelled = useRef(false)
 
-  const provider = settings.provider
+  const keySaved = Boolean(secrets?.apiKeys[provider])
+  const completedCount = Object.values(progress).filter((p) => p.completedAt).length
 
-  // Never carry a partially typed key over to another provider.
+  // Never carry a partially typed key (or a stale model list) to another provider.
   useEffect(() => {
     setKeyDraft('')
-    setError(null)
+    setModels([])
+    setModelsError(null)
+    setManualModel(false)
   }, [provider])
 
   useEffect(() => {
-    if (open) void refreshSecrets()
-    else setDevice(null)
+    if (!open) return
+    void refreshSecrets()
+    void window.academy.app.info().then((info) => {
+      setAppVersion(info.version)
+      setDataPath(info.dataPath)
+    })
   }, [open, refreshSecrets])
 
+  // Auto-discover models as soon as the dialog opens for a provider that already has a key.
   useEffect(() => {
-    if (!open) return
-    void window.academy.app.info().then((info) => setDataPath(info.dataPath))
-  }, [open])
-
-  // OAuth device flow polling
-  useEffect(() => {
-    if (!device) return
-    cancelled.current = false
-    let interval = device.interval
-    let timer: ReturnType<typeof setTimeout>
-
-    const poll = async () => {
-      try {
-        const res = await window.academy.github.pollDeviceFlow(settings.githubClientId, device.deviceCode)
-        if (cancelled.current) return
-        switch (res.status) {
-          case 'success':
-            setDevice(null)
-            setNotice(`به GitHub متصل شدید: ${res.login}`)
-            await refreshSecrets()
-            return
-          case 'pending':
-            timer = setTimeout(poll, interval * 1000)
-            return
-          case 'slow_down':
-            interval = res.interval ?? interval + 5
-            timer = setTimeout(poll, interval * 1000)
-            return
-          default:
-            setDevice(null)
-            setDeviceError(res.message)
-        }
-      } catch (e) {
-        if (!cancelled.current) {
-          setDevice(null)
-          setDeviceError(e instanceof Error ? e.message : 'خطای ورود به GitHub')
-        }
-      }
-    }
-
-    timer = setTimeout(poll, interval * 1000)
-    return () => {
-      cancelled.current = true
-      clearTimeout(timer)
-    }
-  }, [device, settings.githubClientId, refreshSecrets])
+    if (!open || !keySaved) return
+    void loadModels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, keySaved, provider])
 
   function flash(msg: string) {
     setNotice(msg)
     setTimeout(() => setNotice(null), 4000)
+  }
+
+  async function loadModels(): Promise<void> {
+    setModelsLoading(true)
+    setModelsError(null)
+    try {
+      const list = await window.academy.ai.listModels({
+        provider,
+        baseUrl: provider === 'openai' ? settings.baseUrl : undefined
+      })
+      setModels(list)
+      if (list.length && !list.some((m) => m.id === settings.models[provider])) {
+        // Keep a custom model selection working, but suggest a real one.
+        setManualModel(false)
+      }
+    } catch (e) {
+      setModels([])
+      setModelsError(e instanceof Error ? e.message : 'دریافت فهرست مدل‌ها ناموفق بود')
+    } finally {
+      setModelsLoading(false)
+    }
   }
 
   async function saveKey() {
@@ -158,7 +153,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       await window.academy.secrets.setApiKey(provider, keyDraft.trim())
       await refreshSecrets()
       setKeyDraft('')
-      flash(`کلید ${PROVIDER_INFO[provider].label} ذخیره شد.`)
+      flash(`کلید ${PROVIDER_INFO[provider].label} ذخیره شد. در حال شناسایی مدل‌ها…`)
+      await loadModels()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'ذخیره کلید ناموفق بود')
     } finally {
@@ -172,6 +168,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     try {
       await window.academy.secrets.setApiKey(provider, null)
       await refreshSecrets()
+      setModels([])
+      setModelsError(null)
       flash(`کلید ${PROVIDER_INFO[provider].label} حذف شد.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'حذف کلید ناموفق بود')
@@ -180,56 +178,21 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     }
   }
 
-  async function connectPat() {
-    setError(null)
-    if (patDraft.trim().length < 20) {
-      setError('توکن GitHub معتبر به نظر نمی‌رسد.')
-      return
-    }
-    setBusy('pat')
+  async function checkUpdate() {
+    setUpdateLoading(true)
+    setUpdateError(null)
     try {
-      await window.academy.secrets.setGithubToken(patDraft.trim())
-      await refreshSecrets()
-      setPatDraft('')
-      flash('توکن GitHub ذخیره شد.')
+      setUpdate(await window.academy.app.checkUpdate())
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'اتصال به GitHub ناموفق بود')
+      setUpdate(null)
+      setUpdateError(e instanceof Error ? e.message : 'بررسی به‌روزرسانی ناموفق بود')
     } finally {
-      setBusy(null)
+      setUpdateLoading(false)
     }
   }
 
-  async function disconnectGithub() {
-    setBusy('github')
-    try {
-      await window.academy.secrets.setGithubToken(null)
-      await refreshSecrets()
-      flash('اتصال GitHub قطع شد.')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function startDeviceFlow() {
-    setError(null)
-    setDeviceError(null)
-    if (!settings.githubClientId.trim()) {
-      setDeviceError('ابتدا Client ID برنامه OAuth گیت‌هاب را وارد کنید.')
-      return
-    }
-    setBusy('device')
-    try {
-      setDevice(await window.academy.github.startDeviceFlow(settings.githubClientId))
-    } catch (e) {
-      setDeviceError(e instanceof Error ? e.message : 'شروع ورود ناموفق بود')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const github = secrets?.github
-  const keySaved = Boolean(secrets?.apiKeys[provider])
-  const completedCount = Object.values(progress).filter((p) => p.completedAt).length
+  const useDropdown = models.length > 0 && !manualModel
+  const selectedModel = settings.models[provider]
 
   return (
     <Modal open={open} onClose={onClose} title="تنظیمات" wide>
@@ -251,7 +214,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       <Section
         title="هوش مصنوعی (BYOK)"
         icon={<Sparkles className="size-4 text-[var(--accent)]" />}
-        description="کلید API شما فقط در همین رایانه ذخیره می‌شود و هرگز در کد یا فضای ابری قرار نمی‌گیرد."
+        description="کلید API فقط روی همین رایانه ذخیره می‌شود. پس از ذخیره، مدل‌های در دسترس کلید شما به‌صورت خودکار شناسایی و در فهرست انتخاب نمایش داده می‌شوند."
       >
         <div className="flex flex-wrap gap-2">
           {AI_PROVIDERS.map((p) => (
@@ -271,11 +234,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         <div className="flex items-center gap-2 text-xs text-[var(--text-2)]">
-          {keySaved ? (
-            <Badge tone="success">کلید ثبت شده است</Badge>
-          ) : (
-            <Badge tone="warning">کلید ثبت نشده</Badge>
-          )}
+          {keySaved ? <Badge tone="success">کلید ثبت شده است</Badge> : <Badge tone="warning">کلید ثبت نشده</Badge>}
           {secrets?.encrypted ? (
             <span className="inline-flex items-center gap-1 text-[var(--success)]">
               <Lock className="size-3" /> رمزنگاری با Keychain سیستم
@@ -309,29 +268,88 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           )}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="block text-xs text-[var(--text-2)]">
-            مدل
+        <div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-xs text-[var(--text-2)]">مدل</span>
+            <div className="flex items-center gap-2">
+              {keySaved && (
+                <button
+                  className="btn btn-ghost px-1.5 py-0.5 text-[0.68rem]"
+                  onClick={() => void loadModels()}
+                  disabled={modelsLoading}
+                >
+                  {modelsLoading ? <Spinner /> : <RefreshCw className="size-3" />}
+                  دریافت فهرست مدل‌ها
+                </button>
+              )}
+              {models.length > 0 && (
+                <button
+                  className="btn btn-ghost px-1.5 py-0.5 text-[0.68rem]"
+                  onClick={() => setManualModel((v) => !v)}
+                >
+                  {manualModel ? 'انتخاب از فهرست' : 'ورود دستی'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {useDropdown ? (
+            <select
+              className="input"
+              value={selectedModel}
+              onChange={(e) => setProviderModel(provider, e.target.value)}
+              aria-label="انتخاب مدل"
+            >
+              {!models.some((m) => m.id === selectedModel) && (
+                <option value={selectedModel}>{selectedModel} (فعلی)</option>
+              )}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label === m.id ? m.id : `${m.label} — ${m.id}`}
+                  {m.contextWindow ? ` (${Math.round(m.contextWindow / 1000)}K)` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
             <input
-              className="input mt-1"
+              className="input"
               dir="ltr"
-              value={settings.models[provider]}
+              value={selectedModel}
               placeholder={DEFAULT_MODELS[provider]}
               onChange={(e) => setProviderModel(provider, e.target.value)}
+              aria-label="نام مدل"
             />
-          </label>
-          <label className="block text-xs text-[var(--text-2)]">
-            Base URL {provider !== 'openai' && '(فقط برای OpenAI-compatible)'}
-            <input
-              className="input mt-1 disabled:opacity-50"
-              dir="ltr"
-              placeholder="https://api.openai.com/v1"
-              value={settings.baseUrl}
-              onChange={(e) => setSettings({ baseUrl: e.target.value })}
-              disabled={provider !== 'openai'}
-            />
-          </label>
+          )}
+
+          {modelsLoading && <p className="mt-1 text-[0.68rem] text-[var(--text-3)]">در حال شناسایی مدل‌های کلید شما…</p>}
+          {modelsError && (
+            <p className="mt-1 text-[0.68rem] leading-5 text-[var(--warning)]">
+              {modelsError} می‌توانید نام مدل را دستی وارد کنید.
+            </p>
+          )}
+          {!modelsLoading && !modelsError && models.length === 0 && keySaved && (
+            <p className="mt-1 text-[0.68rem] text-[var(--text-3)]">
+              فهرستی دریافت نشد؛ نام مدل را دستی وارد کنید یا دوباره تلاش کنید.
+            </p>
+          )}
+          {!keySaved && (
+            <p className="mt-1 text-[0.68rem] text-[var(--text-3)]">
+              ابتدا کلید را ذخیره کنید تا فهرست مدل‌های مجاز نمایش داده شود.
+            </p>
+          )}
         </div>
+
+        <label className="block text-xs text-[var(--text-2)]">
+          Base URL {provider !== 'openai' && '(فقط برای سرویس‌های سازگار با OpenAI)'}
+          <input
+            className="input mt-1 disabled:opacity-50"
+            dir="ltr"
+            placeholder="https://api.openai.com/v1"
+            value={settings.baseUrl}
+            onChange={(e) => setSettings({ baseUrl: e.target.value })}
+            disabled={provider !== 'openai'}
+          />
+        </label>
 
         <p className="text-[0.7rem] leading-6 text-[var(--text-3)]">
           {PROVIDER_INFO[provider].hint}{' '}
@@ -345,100 +363,74 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       </Section>
 
       <Section
-        title="اتصال GitHub"
-        icon={<GitBranch className="size-4" />}
-        description="برای بررسی مخازن خصوصی و جلوگیری از محدودیت نرخ API. دسترسی فقط خواندن مخازن است."
+        title="به‌روزرسانی"
+        icon={<Download className="size-4" />}
+        description="نسخه‌ی جدید برنامه از صفحه‌ی انتشار GitHub خوانده می‌شود."
       >
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          {github?.connected ? (
-            <>
-              <Badge tone="success">
-                متصل به {github.login} ({github.method === 'oauth' ? 'OAuth' : 'توکن'})
-              </Badge>
-              <button className="btn btn-secondary ms-auto text-xs" onClick={() => void disconnectGithub()} disabled={busy === 'github'}>
-                <LogOut className="size-3.5" /> قطع اتصال
-              </button>
-            </>
-          ) : (
-            <Badge tone="neutral">متصل نیست (فقط مخازن عمومی)</Badge>
-          )}
+          <span className="chip font-mono" dir="ltr">
+            v{appVersion || '…'}
+          </span>
+          <button className="btn btn-secondary text-xs" onClick={() => void checkUpdate()} disabled={updateLoading}>
+            {updateLoading ? <Spinner /> : <RefreshCw className="size-3.5" />}
+            بررسی به‌روزرسانی
+          </button>
+          <button
+            className="btn btn-ghost text-xs"
+            onClick={() => void window.academy.shell.openExternal(RELEASES_URL)}
+          >
+            صفحه‌ی نسخه‌ها
+          </button>
         </div>
 
-        <div className="rounded-xl bg-[var(--surface-2)] p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-            <ShieldCheck className="size-3.5" /> گزینه ۱: Personal Access Token
-          </p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="password"
-              className="input"
-              placeholder="github_pat_..."
-              value={patDraft}
-              onChange={(e) => setPatDraft(e.target.value)}
-              autoComplete="off"
-            />
-            <button className="btn btn-secondary shrink-0" onClick={() => void connectPat()} disabled={busy === 'pat'}>
-              {busy === 'pat' ? <Spinner /> : <KeyRound className="size-4" />}
-              اتصال
-            </button>
-          </div>
-          <p className="mt-1.5 text-[0.68rem] text-[var(--text-3)]">
-            یک توکن با دسترسی <span className="font-mono">repo</span> بسازید (برای مخازن خصوصی) یا فقط
-            <span className="font-mono"> public_repo</span>.
-          </p>
-        </div>
+        {updateError && <Callout tone="danger">{updateError}</Callout>}
 
-        <div className="rounded-xl bg-[var(--surface-2)] p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-            <GitBranch className="size-3.5" /> گزینه ۲: ورود OAuth (Device Flow)
-          </p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              className="input"
-              dir="ltr"
-              placeholder="OAuth App Client ID"
-              value={settings.githubClientId}
-              onChange={(e) => setSettings({ githubClientId: e.target.value })}
-            />
-            <button
-              className="btn btn-secondary shrink-0"
-              onClick={() => void startDeviceFlow()}
-              disabled={busy === 'device' || Boolean(device)}
-            >
-              {busy === 'device' ? <Spinner /> : <GitBranch className="size-4" />}
-              شروع ورود
-            </button>
-          </div>
-
-          {deviceError && <p className="mt-2 text-xs text-[var(--danger)]">{deviceError}</p>}
-
-          {device && (
-            <div className="mt-2 rounded-lg border border-[var(--border-soft)] bg-[var(--surface-1)] p-3 text-xs">
-              <p>این کد را در صفحه‌ی گیت‌هاب وارد کنید:</p>
-              <div className="my-2 flex items-center gap-2">
-                <code className="rounded bg-[var(--surface-3)] px-2 py-1 font-mono text-base tracking-widest">
-                  {device.userCode}
-                </code>
-                <button
-                  className="btn btn-ghost px-1.5 py-1"
-                  aria-label="کپی کد"
-                  onClick={() => void navigator.clipboard.writeText(device.userCode)}
-                >
-                  <Copy className="size-3.5" />
-                </button>
-                <button
-                  className="btn btn-secondary ms-auto text-[0.7rem]"
-                  onClick={() => void window.academy.shell.openExternal(device.verificationUri)}
-                >
-                  باز کردن {device.verificationUri.replace('https://', '')}
-                </button>
-              </div>
-              <p className="flex items-center gap-1.5 text-[var(--text-3)]">
-                <Loader2 className="size-3 animate-spin" /> در انتظار تأیید شما در مرورگر…
+        {update && (
+          <div className="rounded-xl bg-[var(--surface-2)] p-3 text-xs leading-6">
+            {update.latestVersion === '' ? (
+              <p className="text-[var(--text-2)]">
+                هنوز نسخه‌ای در GitHub منتشر نشده است.
               </p>
-            </div>
-          )}
-        </div>
+            ) : update.upToDate ? (
+              <p className="flex items-center gap-1.5 text-[var(--success)]">
+                <CheckCircle2 className="size-3.5" />
+                نسخه‌ی شما به‌روز است (v{update.latestVersion}).
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <p className="font-semibold text-[var(--text-1)]">
+                  نسخه‌ی جدید v{update.latestVersion} منتشر شده است.
+                </p>
+                {update.assetName && (
+                  <p className="font-mono text-[0.68rem] text-[var(--text-3)]" dir="ltr">
+                    {update.assetName}
+                  </p>
+                )}
+                {update.notes && (
+                  <p className="max-h-28 overflow-y-auto whitespace-pre-line text-[var(--text-2)]">
+                    {update.notes}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="btn btn-primary text-xs"
+                    onClick={() =>
+                      void window.academy.shell.openExternal(update.downloadUrl ?? update.releaseUrl)
+                    }
+                  >
+                    <Download className="size-3.5" /> دانلود نسخه‌ی جدید
+                  </button>
+                  <button
+                    className="btn btn-ghost text-xs"
+                    onClick={() => void window.academy.shell.openExternal(update.releaseUrl)}
+                  >
+                    جزئیات در GitHub
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </Section>
 
       <Section title="ظاهر" icon={<Palette className="size-4" />}>
@@ -457,11 +449,17 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
 
       <Section
         title="داده‌ها"
-        icon={<RotateCcw className="size-4" />}
-        description={`پیشرفت شما در ${completedCount} درس تکمیل‌شده، به‌صورت محلی ذخیره شده است.`}
+        icon={<Database className="size-4" />}
+        description={`پیشرفت شما (${completedCount} درس تکمیل‌شده) به‌صورت محلی ذخیره شده است.`}
       >
         <p className="break-all font-mono text-[0.68rem] text-[var(--text-3)]" dir="ltr">
           {dataPath || '…'}
+        </p>
+        <p className="text-[0.68rem] leading-6 text-[var(--text-3)]">
+          پروژه متن‌باز است:{' '}
+          <button className="underline" onClick={() => void window.academy.shell.openExternal(REPO_URL)}>
+            {REPO_URL.replace('https://', '')}
+          </button>
         </p>
         {confirmReset ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -483,7 +481,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           </div>
         ) : (
           <button className="btn btn-secondary text-xs" onClick={() => setConfirmReset(true)}>
-            <Trash2 className="size-3.5" /> پاک کردن پیشرفت
+            <RotateCcw className="size-3.5" /> پاک کردن پیشرفت
           </button>
         )}
       </Section>

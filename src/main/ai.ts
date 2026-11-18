@@ -1,4 +1,4 @@
-import type { AICompletionRequest } from '@shared/types'
+import type { AICompletionRequest, ModelInfo, ModelListRequest } from '@shared/types'
 import { getApiKey } from './storage'
 
 const TIMEOUT = 180_000
@@ -87,6 +87,103 @@ export async function complete(r: AICompletionRequest): Promise<string> {
       return openai(key, r)
     case 'anthropic':
       return anthropic(key, r)
+    default:
+      throw new Error('سرویس ناشناخته')
+  }
+}
+
+
+// ---------- Model discovery ----------
+
+const NON_CHAT =
+  /(embedding|whisper|tts|dall-e|moderation|transcribe|audio-speech|image-1|sora|davinci|babbage|curie|(^|-)ada($|-)|text-similarity|text-search|code-search)/i
+
+async function listGemini(key: string): Promise<ModelInfo[]> {
+  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
+    headers: { 'x-goog-api-key': key, Accept: 'application/json' },
+    signal: AbortSignal.timeout(30_000)
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = (await res.json()) as {
+    models?: {
+      name: string
+      displayName?: string
+      inputTokenLimit?: number
+      supportedGenerationMethods?: string[]
+    }[]
+  }
+  return (body.models ?? [])
+    .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
+    .map((m) => ({
+      id: m.name.replace(/^models\//, ''),
+      label: m.displayName ?? m.name.replace(/^models\//, ''),
+      contextWindow: m.inputTokenLimit
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+async function listOpenAI(key: string, baseUrl?: string): Promise<ModelInfo[]> {
+  const base = (baseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '')
+  const res = await fetch(`${base}/models`, {
+    headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(30_000)
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = (await res.json()) as { data?: { id: string; created?: number }[] }
+  const score = (id: string): number => {
+    if (/^o\d/.test(id)) return 0
+    if (/^gpt-5/.test(id)) return 1
+    if (/^gpt-4\.1/.test(id)) return 2
+    if (/^gpt-4o/.test(id)) return 3
+    if (/^gpt-4/.test(id)) return 4
+    if (/^gpt-3\.5/.test(id)) return 5
+    return 6
+  }
+  return (body.data ?? [])
+    .filter((m) => !NON_CHAT.test(m.id))
+    .sort((a, b) => score(a.id) - score(b.id) || (b.created ?? 0) - (a.created ?? 0) || a.id.localeCompare(b.id))
+    .map((m) => ({ id: m.id, label: m.id }))
+}
+
+async function listAnthropic(key: string): Promise<ModelInfo[]> {
+  const models: ModelInfo[] = []
+  let afterId: string | undefined
+  for (let page = 0; page < 5; page++) {
+    const url = new URL('https://api.anthropic.com/v1/models')
+    url.searchParams.set('limit', '100')
+    if (afterId) url.searchParams.set('after_id', afterId)
+
+    const res = await fetch(url, {
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        Accept: 'application/json'
+      },
+      signal: AbortSignal.timeout(30_000)
+    })
+    if (!res.ok) throw new Error(await readError(res))
+    const body = (await res.json()) as {
+      data?: { id: string; display_name?: string }[]
+      has_more?: boolean
+      last_id?: string
+    }
+    for (const m of body.data ?? []) models.push({ id: m.id, label: m.display_name ?? m.id })
+    if (!body.has_more || !body.last_id) break
+    afterId = body.last_id
+  }
+  return models
+}
+
+export async function listModels({ provider, baseUrl }: ModelListRequest): Promise<ModelInfo[]> {
+  const key = await getApiKey(provider)
+  if (!key) throw new Error('برای دریافت لیست مدل‌ها ابتدا کلید API را ذخیره کنید.')
+  switch (provider) {
+    case 'gemini':
+      return listGemini(key)
+    case 'openai':
+      return listOpenAI(key, baseUrl)
+    case 'anthropic':
+      return listAnthropic(key)
     default:
       throw new Error('سرویس ناشناخته')
   }

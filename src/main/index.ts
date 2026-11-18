@@ -4,6 +4,10 @@ import type { AIProvider, IpcResult } from '@shared/types'
 import * as storage from './storage'
 import * as github from './github'
 import * as ai from './ai'
+import { checkForUpdate } from './update'
+
+declare const __APP_VERSION__: string
+const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? __APP_VERSION__ : app.getVersion()
 
 function isSafeExternal(url: string): boolean {
   try {
@@ -92,38 +96,24 @@ function registerIpc(): void {
     await storage.setApiKey(provider, key)
     return storage.secretsStatus()
   })
-  handle('secrets:setGithubToken', async (token: string | null) => {
-    if (token && token.trim()) {
-      const login = await github.validateToken(token.trim())
-      await storage.setGithub({ token: token.trim(), login, method: 'pat' })
-    } else {
-      await storage.setGithub(null)
-    }
-    return storage.secretsStatus()
-  })
-
-  handle('github:startDeviceFlow', (clientId: string) => github.startDeviceFlow(clientId))
-  handle('github:pollDeviceFlow', async (clientId: string, deviceCode: string) => {
-    const { result, token } = await github.pollDeviceFlow(clientId, deviceCode)
-    if (result.status === 'success' && token) {
-      await storage.setGithub({ token, login: result.login, method: 'oauth' })
-    }
-    return result
-  })
   handle('github:fetchRepo', (ref: string) => github.fetchRepo(ref))
 
   handle('ai:complete', (req: Parameters<typeof ai.complete>[0]) => ai.complete(req))
+  handle('ai:listModels', (req: Parameters<typeof ai.listModels>[0]) => ai.listModels(req))
 
   handle('shell:openExternal', async (url: string) => {
     if (!isSafeExternal(url)) throw new Error('Blocked URL')
     await shell.openExternal(url)
   })
   handle('app:info', () => ({
-    version: app.getVersion(),
+    version: APP_VERSION,
     platform: process.platform,
     dataPath: app.getPath('userData')
   }))
+  handle('app:checkUpdate', () => checkForUpdate(APP_VERSION))
 }
+
+app.setName('FullStack Academy')
 
 const gotLock = app.requestSingleInstanceLock()
 

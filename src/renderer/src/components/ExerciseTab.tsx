@@ -94,13 +94,24 @@ export function ExerciseTab({ lesson, onGoReview }: { lesson: Lesson; onGoReview
           </div>
 
           <div className="rounded-xl border border-dashed border-[var(--border-soft)] p-3">
-            <p className="text-xs text-[var(--text-2)]">
+            <p className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-2)]">
               نام پیشنهادی مخزن:
               <code className="mx-1.5 rounded bg-[var(--surface-2)] px-1.5 py-0.5 font-mono text-[0.75rem]" dir="ltr">
                 {exercise.repoName}
               </code>
               <button className="btn btn-ghost px-1.5 py-0.5 align-middle" onClick={() => void copyRepoName()} aria-label="کپی نام مخزن">
                 {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
+              </button>
+              <button
+                className="btn btn-ghost ms-auto px-1.5 py-0.5 text-[0.7rem] text-[var(--accent)]"
+                onClick={() =>
+                  void window.academy.shell.openExternal(
+                    `https://github.com/new?name=${encodeURIComponent(exercise.repoName)}&description=${encodeURIComponent(exercise.title)}`
+                  )
+                }
+              >
+                <ExternalLink className="size-3.5" />
+                ساخت مخزن عمومی در GitHub
               </button>
             </p>
           </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { GitBranch, GraduationCap, KeyRound, Moon, Settings2, Sparkles, Sun } from 'lucide-react'
+import { GraduationCap, KeyRound, Moon, Settings2, Sparkles, Sun } from 'lucide-react'
 import { useApp } from '@/store/useApp'
 import { useSecrets } from '@/store/useSecrets'
 import { Sidebar } from '@/components/Sidebar'
@@ -19,7 +19,6 @@ function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   }, [refresh])
 
   const hasKey = Boolean(secrets?.apiKeys[settings.provider])
-  const githubConnected = Boolean(secrets?.github.connected)
   const completed = Object.values(progress).filter((p) => p.completedAt).length
 
   return (
@@ -36,14 +35,6 @@ function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
         >
           {hasKey ? <Sparkles className="size-3" /> : <KeyRound className="size-3" />}
           {hasKey ? settings.provider : 'کلید AI'}
-        </button>
-        <button
-          className={`chip ${githubConnected ? 'text-[var(--success)]' : 'text-[var(--text-3)]'}`}
-          onClick={onOpenSettings}
-          title={githubConnected ? `متصل به ${secrets?.github.login}` : 'GitHub متصل نیست'}
-        >
-          <GitBranch className="size-3" />
-          {githubConnected ? secrets?.github.login : 'GitHub'}
         </button>
         <button
           className="btn btn-ghost px-2 py-1"

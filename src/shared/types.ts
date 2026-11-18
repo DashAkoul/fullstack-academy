@@ -12,9 +12,33 @@ export const DEFAULT_MODELS: Record<AIProvider, string> = {
 
 export interface SecretsStatus {
   apiKeys: Record<AIProvider, boolean>
-  github: { connected: boolean; login?: string; method?: 'oauth' | 'pat' }
   /** false when the OS keychain is unavailable and secrets are stored obfuscated only */
   encrypted: boolean
+}
+
+export interface ModelInfo {
+  /** model id to pass to the API */
+  id: string
+  /** human friendly label */
+  label: string
+  /** optional context window in tokens */
+  contextWindow?: number
+}
+
+export interface ModelListRequest {
+  provider: AIProvider
+  baseUrl?: string
+}
+
+export interface UpdateInfo {
+  currentVersion: string
+  latestVersion: string
+  upToDate: boolean
+  releaseUrl: string
+  publishedAt?: string
+  notes?: string
+  downloadUrl?: string
+  assetName?: string
 }
 
 export interface AICompletionRequest {
@@ -26,19 +50,6 @@ export interface AICompletionRequest {
   prompt: string
   json: boolean
 }
-
-export interface DeviceCodeResponse {
-  deviceCode: string
-  userCode: string
-  verificationUri: string
-  expiresIn: number
-  interval: number
-}
-
-export type DevicePollResult =
-  | { status: 'pending' | 'slow_down'; interval?: number }
-  | { status: 'success'; login: string }
-  | { status: 'expired' | 'denied' | 'error'; message: string }
 
 export interface RepoFile {
   path: string
@@ -80,16 +91,17 @@ export interface AcademyBridge {
   secrets: {
     status(): Promise<SecretsStatus>
     setApiKey(provider: AIProvider, key: string | null): Promise<SecretsStatus>
-    setGithubToken(token: string | null): Promise<SecretsStatus>
   }
   github: {
-    startDeviceFlow(clientId: string): Promise<DeviceCodeResponse>
-    pollDeviceFlow(clientId: string, deviceCode: string): Promise<DevicePollResult>
     fetchRepo(ref: string): Promise<RepoSnapshot>
   }
   ai: {
     complete(req: AICompletionRequest): Promise<string>
+    listModels(req: ModelListRequest): Promise<ModelInfo[]>
   }
   shell: { openExternal(url: string): Promise<void> }
-  app: { info(): Promise<AppInfo> }
+  app: {
+    info(): Promise<AppInfo>
+    checkUpdate(): Promise<UpdateInfo>
+  }
 }

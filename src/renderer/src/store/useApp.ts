@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { AIProvider } from '@shared/types'
-import { DEFAULT_MODELS } from '@shared/types'
+import { AI_PROVIDERS, DEFAULT_MODELS } from '@shared/types'
 import type { MiniLesson, ReviewResult } from '@shared/review'
 import { lessons, lessonById } from '@/data/curriculum'
 
@@ -36,7 +36,6 @@ export interface Settings {
   models: Record<AIProvider, string>
   baseUrl: string
   theme: ThemeMode
-  githubClientId: string
 }
 
 export interface PersistedState {
@@ -52,8 +51,7 @@ const defaultSettings: Settings = {
   provider: 'gemini',
   models: { ...DEFAULT_MODELS },
   baseUrl: '',
-  theme: 'dark',
-  githubClientId: ''
+  theme: 'dark'
 }
 
 interface AppStore {
@@ -102,10 +100,19 @@ function sanitize(raw: unknown): PersistedState | null {
   if (!raw || typeof raw !== 'object') return null
   const candidate = raw as Partial<PersistedState>
   if (!candidate.progress || typeof candidate.progress !== 'object') return null
+  const saved: Partial<Settings> = candidate.settings ?? {}
+  const models = { ...defaultSettings.models }
+  for (const provider of AI_PROVIDERS) {
+    const model = saved.models?.[provider]
+    if (typeof model === 'string' && model.trim()) models[provider] = model.trim()
+  }
   const settings: Settings = {
-    ...defaultSettings,
-    ...(candidate.settings ?? {}),
-    models: { ...defaultSettings.models, ...(candidate.settings?.models ?? {}) }
+    provider: AI_PROVIDERS.includes(saved.provider as AIProvider)
+      ? (saved.provider as AIProvider)
+      : defaultSettings.provider,
+    models,
+    baseUrl: typeof saved.baseUrl === 'string' ? saved.baseUrl : '',
+    theme: saved.theme === 'light' ? 'light' : 'dark'
   }
   return {
     version: 1,
