@@ -1,0 +1,209 @@
+import { create } from 'zustand'
+import type { AIProvider } from '@shared/types'
+import { DEFAULT_MODELS } from '@shared/types'
+import type { MiniLesson, ReviewResult } from '@shared/review'
+import { lessons, lessonById } from '@/data/curriculum'
+
+export type ThemeMode = 'dark' | 'light'
+
+export interface ReviewAttempt {
+  id: string
+  at: string
+  repoUrl: string
+  commitSha: string
+  provider: AIProvider
+  model: string
+  result: ReviewResult
+  passed: boolean
+  reasons: string[]
+}
+
+export interface MiniLessonRecord extends MiniLesson {
+  id: string
+  createdAt: string
+  lessonId: string
+}
+
+export interface LessonProgress {
+  repoUrl?: string
+  attempts: ReviewAttempt[]
+  miniLessons: MiniLessonRecord[]
+  completedAt?: string
+}
+
+export interface Settings {
+  provider: AIProvider
+  models: Record<AIProvider, string>
+  baseUrl: string
+  theme: ThemeMode
+  githubClientId: string
+}
+
+export interface PersistedState {
+  version: 1
+  settings: Settings
+  progress: Record<string, LessonProgress>
+  lastLessonId?: string
+}
+
+const STORAGE_KEY = 'academy-state'
+
+const defaultSettings: Settings = {
+  provider: 'gemini',
+  models: { ...DEFAULT_MODELS },
+  baseUrl: '',
+  theme: 'dark',
+  githubClientId: ''
+}
+
+interface AppStore {
+  hydrated: boolean
+  settings: Settings
+  progress: Record<string, LessonProgress>
+  activeLessonId: string
+  hydrate: () => Promise<void>
+  setSettings: (patch: Partial<Settings>) => void
+  setProviderModel: (provider: AIProvider, model: string) => void
+  setActiveLesson: (id: string) => void
+  addAttempt: (lessonId: string, attempt: ReviewAttempt, passed: boolean) => void
+  addMiniLesson: (lessonId: string, mini: MiniLessonRecord) => void
+  setRepoUrl: (lessonId: string, url: string) => void
+  resetLesson: (lessonId: string) => void
+  resetAll: () => Promise<void>
+}
+
+const emptyProgress = (): LessonProgress => ({ attempts: [], miniLessons: [] })
+
+export const progressFor = (state: Pick<AppStore, 'progress'>, lessonId: string): LessonProgress =>
+  state.progress[lessonId] ?? emptyProgress()
+
+/** Lesson N+1 unlocks only after lesson N is completed. */
+export function isLessonUnlocked(progress: Record<string, LessonProgress>, lessonId: string): boolean {
+  const lesson = lessonById(lessonId)
+  if (!lesson) return false
+  if (lesson.index === 0) return true
+  const previous = lessons[lesson.index - 1]
+  return Boolean(progress[previous.id]?.completedAt)
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+function persist(get: () => AppStore): void {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    const { settings, progress, activeLessonId } = get()
+    const payload: PersistedState = { version: 1, settings, progress, lastLessonId: activeLessonId }
+    void window.academy.storage.write(STORAGE_KEY, JSON.stringify(payload)).catch((e) => {
+      console.error('ذخیره‌سازی پیشرفت ناموفق بود', e)
+    })
+  }, 250)
+}
+
+function sanitize(raw: unknown): PersistedState | null {
+  if (!raw || typeof raw !== 'object') return null
+  const candidate = raw as Partial<PersistedState>
+  if (!candidate.progress || typeof candidate.progress !== 'object') return null
+  const settings: Settings = {
+    ...defaultSettings,
+    ...(candidate.settings ?? {}),
+    models: { ...defaultSettings.models, ...(candidate.settings?.models ?? {}) }
+  }
+  return {
+    version: 1,
+    settings,
+    progress: candidate.progress,
+    lastLessonId: candidate.lastLessonId
+  }
+}
+
+export const useApp = create<AppStore>((set, get) => ({
+  hydrated: false,
+  settings: defaultSettings,
+  progress: {},
+  activeLessonId: lessons[0].id,
+
+  hydrate: async () => {
+    try {
+      const raw = await window.academy.storage.read(STORAGE_KEY)
+      const parsed = raw ? sanitize(JSON.parse(raw)) : null
+      if (parsed) {
+        const active = parsed.lastLessonId && lessonById(parsed.lastLessonId)
+          ? parsed.lastLessonId
+          : lessons[0].id
+        set({ settings: parsed.settings, progress: parsed.progress, activeLessonId: active })
+      }
+    } catch (e) {
+      console.error('بارگذاری وضعیت ناموفق بود', e)
+    } finally {
+      set({ hydrated: true })
+      document.documentElement.dataset.theme = get().settings.theme
+    }
+  },
+
+  setSettings: (patch) => {
+    set((s) => ({ settings: { ...s.settings, ...patch } }))
+    if (patch.theme) document.documentElement.dataset.theme = patch.theme
+    persist(get)
+  },
+
+  setProviderModel: (provider, model) => {
+    set((s) => ({ settings: { ...s.settings, provider, models: { ...s.settings.models, [provider]: model } } }))
+    persist(get)
+  },
+
+  setActiveLesson: (id) => {
+    set({ activeLessonId: id })
+    persist(get)
+  },
+
+  addAttempt: (lessonId, attempt, passed) => {
+    set((s) => {
+      const current = s.progress[lessonId] ?? emptyProgress()
+      const next: LessonProgress = {
+        ...current,
+        repoUrl: attempt.repoUrl,
+        attempts: [attempt, ...current.attempts].slice(0, 20),
+        completedAt: passed ? (current.completedAt ?? attempt.at) : current.completedAt
+      }
+      return { progress: { ...s.progress, [lessonId]: next } }
+    })
+    persist(get)
+  },
+
+  addMiniLesson: (lessonId, mini) => {
+    set((s) => {
+      const current = s.progress[lessonId] ?? emptyProgress()
+      return {
+        progress: {
+          ...s.progress,
+          [lessonId]: { ...current, miniLessons: [mini, ...current.miniLessons].slice(0, 30) }
+        }
+      }
+    })
+    persist(get)
+  },
+
+  setRepoUrl: (lessonId, url) => {
+    set((s) => {
+      const current = s.progress[lessonId] ?? emptyProgress()
+      return { progress: { ...s.progress, [lessonId]: { ...current, repoUrl: url } } }
+    })
+    persist(get)
+  },
+
+  resetLesson: (lessonId) => {
+    set((s) => {
+      const next = { ...s.progress }
+      delete next[lessonId]
+      return { progress: next }
+    })
+    persist(get)
+  },
+
+  resetAll: async () => {
+    set({ progress: {} })
+    await window.academy.storage.remove(STORAGE_KEY)
+  }
+}))
+
+export const useLessonProgress = (lessonId: string): LessonProgress =>
+  useApp((s) => s.progress[lessonId]) ?? emptyProgress()

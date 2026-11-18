@@ -1,0 +1,331 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  --font-sans: 'Vazirmatn', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+:root,
+[data-theme='light'] {
+  --surface-0: #f6f7fb;
+  --surface-1: #ffffff;
+  --surface-2: #eef1f7;
+  --surface-3: #e2e7f1;
+  --border-soft: #d8deeb;
+  --text-1: #0f172a;
+  --text-2: #475569;
+  --text-3: #7a8699;
+  --accent: #4f46e5;
+  --accent-soft: #eef0ff;
+  --success: #16794c;
+  --success-soft: #e7f7ee;
+  --danger: #b3273a;
+  --danger-soft: #fdecef;
+  --warning: #9a6a00;
+  --warning-soft: #fdf4e3;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --surface-0: #0a0e16;
+  --surface-1: #111725;
+  --surface-2: #172033;
+  --surface-3: #1f2a40;
+  --border-soft: #253148;
+  --text-1: #e8edf7;
+  --text-2: #9fadc4;
+  --text-3: #74829a;
+  --accent: #8b92ff;
+  --accent-soft: #1b2140;
+  --success: #4ade9a;
+  --success-soft: #10291f;
+  --danger: #ff8b9d;
+  --danger-soft: #2c141b;
+  --warning: #f0c060;
+  --warning-soft: #2b2210;
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    border-color: var(--border-soft);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-1);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+    border-radius: 999px;
+    border: 2px solid var(--surface-0);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .surface-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.55rem 0.95rem;
+    transition:
+      background 120ms ease,
+      opacity 120ms ease,
+      transform 120ms ease;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  [data-theme='dark'] .btn-primary {
+    color: #0a0e16;
+  }
+  .btn-secondary {
+    background: var(--surface-2);
+    color: var(--text-1);
+    border: 1px solid var(--border-soft);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-2);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--text-1);
+  }
+  .btn-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  }
+
+  .input {
+    width: 100%;
+    background: var(--surface-0);
+    border: 1px solid var(--border-soft);
+    border-radius: 10px;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-1);
+    font-family: inherit;
+    direction: ltr;
+    text-align: left;
+  }
+  .input::placeholder {
+    color: var(--text-3);
+    direction: rtl;
+    text-align: right;
+  }
+  .input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.7rem;
+    padding: 0.18rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--border-soft);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+}
+
+/* ---- lesson typography ---- */
+.lesson-prose {
+  color: var(--text-1);
+  line-height: 1.95;
+  font-size: 0.95rem;
+  --tw-prose-body: var(--text-1);
+  --tw-prose-headings: var(--text-1);
+  --tw-prose-links: var(--accent);
+  --tw-prose-bold: var(--text-1);
+  --tw-prose-quotes: var(--text-2);
+  --tw-prose-quote-borders: var(--accent);
+  --tw-prose-counters: var(--text-3);
+  --tw-prose-bullets: var(--text-3);
+  --tw-prose-hr: var(--border-soft);
+  --tw-prose-th-borders: var(--border-soft);
+  --tw-prose-td-borders: var(--border-soft);
+}
+.lesson-prose > :where(h1:first-child) {
+  display: none;
+}
+.lesson-prose :where(h1) {
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.6rem;
+}
+.lesson-prose :where(h2) {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-top: 2.2rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+.lesson-prose :where(h3) {
+  font-size: 1.02rem;
+  font-weight: 600;
+  margin-top: 1.6rem;
+}
+.lesson-prose :where(p, li) {
+  color: var(--text-1);
+}
+.lesson-prose :where(strong) {
+  color: var(--text-1);
+  font-weight: 700;
+}
+.lesson-prose :where(a) {
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.lesson-prose :where(code):not(pre code) {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  padding: 0.1rem 0.34rem;
+  border-radius: 6px;
+  font-size: 0.82em;
+  direction: ltr;
+  unicode-bidi: embed;
+  display: inline-block;
+}
+.lesson-prose :where(pre) {
+  direction: ltr;
+  text-align: left;
+  background: #0d1117 !important;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  margin: 1.1rem 0;
+}
+.lesson-prose :where(pre code) {
+  display: block;
+  padding: 1rem 1.1rem;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  background: transparent !important;
+  font-family: var(--font-mono);
+}
+.lesson-prose :where(table) {
+  font-size: 0.82rem;
+  width: 100%;
+  display: table;
+}
+.lesson-prose :where(th) {
+  background: var(--surface-2);
+  font-weight: 600;
+  padding: 0.5rem 0.7rem;
+}
+.lesson-prose :where(td) {
+  padding: 0.45rem 0.7rem;
+}
+.lesson-prose :where(blockquote) {
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 0.15rem 1rem;
+  font-style: normal;
+  border-inline-start: 3px solid var(--accent);
+}
+.lesson-prose :where(blockquote p)::before,
+.lesson-prose :where(blockquote p)::after {
+  content: none;
+}
+.lesson-prose :where(ul > li)::marker {
+  color: var(--accent);
+}
+.lesson-prose :where(hr) {
+  margin: 2rem 0;
+}
+
+.code-shell {
+  position: relative;
+}
+.code-lang {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.6rem;
+  font-size: 0.62rem;
+  color: #7d8590;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-in {
+  animation: fade-up 220ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
