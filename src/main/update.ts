@@ -33,7 +33,10 @@ export function preferredAsset(
   return undefined
 }
 
-export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo> {
+export async function checkForUpdate(
+  currentVersion: string,
+  platform: NodeJS.Platform = process.platform
+): Promise<UpdateInfo> {
   const res = await fetch(LATEST_RELEASE_API, {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -56,7 +59,7 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
 
   const release = (await res.json()) as GithubRelease
   const latestVersion = release.tag_name.replace(/^v/i, '')
-  const asset = preferredAsset(release.assets ?? [], process.platform)
+  const asset = preferredAsset(release.assets ?? [], platform)
 
   return {
     currentVersion,

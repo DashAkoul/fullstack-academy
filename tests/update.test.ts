@@ -54,7 +54,7 @@ describe('checkForUpdate', () => {
       assets
     })
 
-    const info = await checkForUpdate('1.0.0')
+    const info = await checkForUpdate('1.0.0', 'win32')
     expect(info.latestVersion).toBe('1.1.0')
     expect(info.upToDate).toBe(false)
     expect(info.downloadUrl).toBe('https://x/setup.exe')
@@ -64,13 +64,13 @@ describe('checkForUpdate', () => {
 
   it('نسخه‌ی برابر را به‌روز می‌داند', async () => {
     stubFetch(200, { tag_name: 'v1.0.0', html_url: 'https://github.com/o/r/releases/tag/v1.0.0', assets })
-    const info = await checkForUpdate('1.0.0')
+    const info = await checkForUpdate('1.0.0', 'linux')
     expect(info.upToDate).toBe(true)
   })
 
   it('وقتی هیچ ریلیزی نیست، بدون خطا وضعیت «منتشر نشده» می‌دهد', async () => {
     stubFetch(404, { message: 'Not Found' })
-    const info = await checkForUpdate('1.0.0')
+    const info = await checkForUpdate('1.0.0', 'linux')
     expect(info.latestVersion).toBe('')
     expect(info.upToDate).toBe(true)
     expect(info.releaseUrl).toContain('/releases')
@@ -78,6 +78,6 @@ describe('checkForUpdate', () => {
 
   it('خطای شبکه یا سرور را گزارش می‌کند', async () => {
     stubFetch(500, {})
-    await expect(checkForUpdate('1.0.0')).rejects.toThrow(/GitHub 500/)
+    await expect(checkForUpdate('1.0.0', 'linux')).rejects.toThrow(/GitHub 500/)
   })
 })
