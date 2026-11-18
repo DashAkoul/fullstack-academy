@@ -1,7 +1,7 @@
 import type { UpdateInfo } from '@shared/types'
 import { APP_REPO, LATEST_RELEASE_API, RELEASES_URL, isNewerVersion } from '@shared/appConfig'
 
-interface ReleaseAsset {
+export interface ReleaseAsset {
   name: string
   browser_download_url: string
 }
@@ -15,7 +15,10 @@ interface GithubRelease {
   assets: ReleaseAsset[]
 }
 
-function preferredAsset(assets: ReleaseAsset[], platform: NodeJS.Platform): ReleaseAsset | undefined {
+export function preferredAsset(
+  assets: ReleaseAsset[],
+  platform: NodeJS.Platform
+): ReleaseAsset | undefined {
   const patterns =
     platform === 'win32'
       ? [/-setup\.exe$/i, /\.exe$/i]
