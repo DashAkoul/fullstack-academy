@@ -1,6 +1,6 @@
 {
   "name": "fullstack-academy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "FullStack Academy — a Persian, offline-first desktop learning path from web basics to full-stack engineering with AI code review.",
   "main": "./out/main/index.js",
   "scripts": {

@@ -1,25 +1,50 @@
 # APIهای بومی و Native Modules
 
-> مراجع: [Expo Permissions](https://docs.expo.dev/guides/permissions/) · [Expo Location](https://docs.expo.dev/versions/latest/sdk/location/) · [Expo Modules API](https://docs.expo.dev/modules/overview/)
+> مراجع: [Expo Permissions](https://docs.expo.dev/guides/permissions/) · [expo-location](https://docs.expo.dev/versions/latest/sdk/location/) · [expo-image-picker](https://docs.expo.dev/versions/latest/sdk/imagepicker/) · [Expo Modules API](https://docs.expo.dev/modules/overview/)
 
-اپ موبایل واقعی با سخت‌افزار حرف می‌زند: دوربین، موقعیت، اعلان، اثر انگشت. این درس الگوی درست و محترمانه‌ی این کار را می‌آموزد.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. اصل اول: مجوز در لحظه‌ی نیاز
+الگوی درست درخواست مجوز، کار با دوربین/گالری، موقعیت مکانی، اعلان‌ها و ذخیره‌ی امن را یاد می‌گیرید و می‌بینید وقتی کتابخانه‌ی آماده نیست چطور ماژول بومی بسازید. در پایان، اپ «گزارش خرابی شهری» تمرین را با مدیریت کامل حالت رد شدن مجوز می‌سازید.
 
-هرگز هنگام باز شدن اپ همه‌ی مجوزها را درخواست نکنید. کاربر باید بفهمد **چرا** الان این اجازه را می‌خواهید.
+---
+
+## ۱. مدل مجوز: در لحظه‌ی نیاز، با توضیح
+
+هر مجوز سه حالت دارد: `granted`، `denied` (می‌توان دوباره پرسید) و `denied` دائمی (`canAskAgain: false`).
 
 ```tsx
-async function askCamera() {
-  const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync()
-  if (status === 'granted') return openCamera()
-  if (!canAskAgain)
+import { Linking, Alert } from 'react-native'
+import * as Location from 'expo-location'
+
+export async function ensureLocation(): Promise<boolean> {
+  const services = await Location.hasServicesEnabledAsync()
+  if (!services) {
+    Alert.alert('مکان‌یابی خاموش است', 'برای ثبت محل خرابی، GPS را روشن کنید.')
+    return false
+  }
+
+  const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync()
+  if (status === 'granted') return true
+
+  if (!canAskAgain) {
     Alert.alert(
-      'دسترسی به دوربین بسته است',
-      'برای گرفتن عکس، در تنظیمات اپ اجازه‌ی دوربین را فعال کنید.',
-      [{ text: 'باز کردن تنظیمات', onPress: () => Linking.openSettings() }, { text: 'بعداً' }]
+      'دسترسی به موقعیت بسته است',
+      'در تنظیمات اپ، دسترسی موقعیت را فعال کنید.',
+      [
+        { text: 'باز کردن تنظیمات', onPress: () => Linking.openSettings() },
+        { text: 'بعداً', style: 'cancel' }
+      ]
     )
+  }
+  return false
 }
 ```
+
+قواعد:
+
+- مجوز را **هنگام باز شدن اپ** نپرسید؛ درست قبل از استفاده بپرسید.
+- متن توضیح مجوز باید بگوید **چرا** و **چه چیزی** (نه «برای بهبود تجربه»).
+- همیشه حالت رد شدن را طراحی کنید؛ اپ نباید بلاک شود.
 
 ## ۲. دوربین و گالری
 
@@ -28,33 +53,40 @@ npx expo install expo-image-picker
 ```
 
 ```tsx
-import * as ImagePicker from 'expo-image-picker'
 import { useState } from 'react'
 import { Image, Pressable, Text, View } from 'react-native'
+import * as ImagePicker from 'expo-image-picker'
 
 export function PhotoInput({ onPicked }: { onPicked: (uri: string) => void }) {
   const [uri, setUri] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   async function pick(from: 'camera' | 'library') {
+    setError(null)
     const perm = from === 'camera'
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync()
-    if (!perm.granted) return
+
+    if (!perm.granted) {
+      setError('برای انتخاب عکس به دسترسی نیاز داریم.')
+      return
+    }
 
     const result = from === 'camera'
-      ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true })
+      ? await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [4, 3] })
       : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 })
 
-    if (!result.canceled) {
-      const asset = result.assets[0]
-      setUri(asset.uri)
-      onPicked(asset.uri)
-    }
+    if (result.canceled) return
+    const asset = result.assets[0]
+    if (!asset) return
+    setUri(asset.uri)
+    onPicked(asset.uri)
   }
 
   return (
     <View style={{ gap: 8 }}>
-      {uri && <Image source={{ uri }} style={{ width: 200, height: 200, borderRadius: 12 }} />}
+      {uri && <Image source={{ uri }} style={{ width: 200, height: 150, borderRadius: 12 }} />}
+      {error && <Text style={{ color: '#f87171' }}>{error}</Text>}
       <Pressable onPress={() => pick('camera')}><Text>گرفتن عکس</Text></Pressable>
       <Pressable onPress={() => pick('library')}><Text>انتخاب از گالری</Text></Pressable>
     </View>
@@ -62,40 +94,73 @@ export function PhotoInput({ onPicked }: { onPicked: (uri: string) => void }) {
 }
 ```
 
-## ۳. موقعیت مکانی
+- کیفیت را کم کنید (`quality: 0.7`) تا آپلود و حافظه بهتر شود.
+- `allowsEditing` تجربه‌ی برش را می‌دهد.
+- URI در `cache` است؛ برای نگه‌داری بلندمدت فایل را با `expo-file-system` کپی کنید.
 
-```bash
-npx expo install expo-location
-```
+## ۳. موقعیت مکانی
 
 ```ts
 import * as Location from 'expo-location'
 
-export async function getCurrentCoords(): Promise<{ lat: number; lng: number } | null> {
-  const services = await Location.hasServicesEnabledAsync()
-  if (!services) {
-    Alert.alert('GPS خاموش است', 'برای ثبت موقعیت، مکان‌یابی گوشی را روشن کنید.')
-    return null
-  }
-
-  const { status } = await Location.requestForegroundPermissionsAsync()
-  if (status !== 'granted') return null
+export async function getCoords(): Promise<{ lat: number; lng: number } | null> {
+  const ok = await ensureLocation()
+  if (!ok) return null
 
   try {
     const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
     return { lat: pos.coords.latitude, lng: pos.coords.longitude }
-  } catch (e) {
-    console.warn('خطای موقعیت', e)
+  } catch (err) {
+    console.warn('خطای موقعیت', err)
     return null
   }
 }
 ```
 
-- `requestForegroundPermissionsAsync` برای استفاده در زمان باز بودن اپ.
-- `requestBackgroundPermissionsAsync` فقط اگر واقعاً لازم است (نیاز به توضیح در App Store و مصرف باتری).
-- همیشه `timeout` و حالت خطا داشته باشید — داخل ساختمان GPS ممکن است دقیق نباشد.
+| گزینه | کاربرد |
+| --- | --- |
+| `Accuracy.Lowest/…/BestForNavigation` | تعادل دقت/باتری |
+| `getLastKnownPositionAsync` | سریع اما ممکن است قدیمی باشد |
+| `watchPositionAsync({ distanceInterval })` | ردیابی مسیر با مصرف کنترل‌شده |
+| `reverseGeocodeAsync` | تبدیل مختصات به آدرس (نیاز به شبکه) |
 
-## ۴. ذخیره‌ی امن: SecureStore
+مجوز پس‌زمینه (`requestBackgroundPermissionsAsync`) فقط اگر واقعاً لازم است؛ نیاز به توضیح در App Store و مصرف باتری بالا دارد.
+
+## ۴. اعلان‌ها
+
+```bash
+npx expo install expo-notifications
+```
+
+```ts
+import * as Notifications from 'expo-notifications'
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false
+  })
+})
+
+export async function scheduleDaily(hour = 20, minute = 0) {
+  const { status } = await Notifications.requestPermissionsAsync()
+  if (status !== 'granted') return null
+
+  await Notifications.cancelAllScheduledNotificationsAsync()
+  return Notifications.scheduleNotificationAsync({
+    content: { title: 'یادآوری', body: 'عادت‌های امروز را ثبت کردی؟' },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute }
+  })
+}
+```
+
+- این «اعلان محلی» است و سرور لازم ندارد.
+- برای push واقعی (ارسال از سرور) به توکن Expo و سرویس push نیاز دارید.
+- در Android کانال اعلان تعریف کنید تا کاربر بتواند صدا را کنترل کند.
+
+## ۵. ذخیره‌ی امن
 
 ```bash
 npx expo install expo-secure-store
@@ -117,45 +182,13 @@ export const tokenStore = {
 
 | داده | ابزار |
 | --- | --- |
-| توکن احراز هویت | SecureStore (Keychain/Keystore) |
-| تنظیمات ساده‌ی UI | AsyncStorage |
-| داده‌ی بزرگ/ساختاریافته | SQLite (expo-sqlite) |
+| توکن/رمز | SecureStore (Keychain/Keystore) |
+| تنظیمات UI | AsyncStorage |
+| داده‌ی ساختاریافته‌ی بزرگ | expo-sqlite |
 
-## ۵. اعلان‌ها
+SecureStore برای مقادیر کوچک (چند KB) طراحی شده است.
 
-```bash
-npx expo install expo-notifications
-```
-
-```ts
-import * as Notifications from 'expo-notifications'
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false
-  })
-})
-
-export async function scheduleDailyReminder(hour = 20, minute = 0) {
-  const { status } = await Notifications.requestPermissionsAsync()
-  if (status !== 'granted') return null
-
-  await Notifications.cancelAllScheduledNotificationsAsync()
-  return Notifications.scheduleNotificationAsync({
-    content: { title: 'یادآوری', body: 'عادت‌های امروز را ثبت کردی؟' },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute }
-  })
-}
-```
-
-برای push واقعی نیاز به توکن Expo و سرور دارید؛ برای یادآوری محلی همین کافی است.
-
-## ۶. تنظیم توضیح مجوزها
-
-در `app.json` (یا `app.config.ts`):
+## ۶. Config Plugins و توضیح مجوزها
 
 ```json
 {
@@ -173,18 +206,23 @@ export async function scheduleDailyReminder(hour = 20, minute = 0) {
       "infoPlist": {
         "NSCameraUsageDescription": "برای ثبت عکس خرابی به دوربین نیاز داریم."
       }
+    },
+    "android": {
+      "permissions": ["ACCESS_FINE_LOCATION"]
     }
   }
 }
 ```
 
-متن باید **مشخص و کاربرمحور** باشد؛ متن‌های عمومی باعث رد شدن در بازبینی App Store می‌شوند.
+متن عمومی باعث رد شدن در بازبینی App Store می‌شود؛ مشخص بنویسید.
 
-## ۷. وقتی کتابخانه‌ی آماده نیست: Expo Modules API
+## ۷. Development Build و Native Modules
 
-اگر به API بومی دسترسی نیاز دارید که پکیج ندارد (یا مجبورید SDK داخلی شرکت را وصل کنید) با Expo Modules یک ماژول بومی بنویسید:
+کتابخانه‌های بومی در Expo Go فقط اگر از قبل داخلش باشند کار می‌کنند. برای ماژول سفارشی:
 
 ```bash
+npx expo run:ios       # بیلد native
+npx expo run:android
 npx create-expo-module@latest --local my-sdk
 ```
 
@@ -196,7 +234,7 @@ public class MySdkModule: Module {
   public func definition() -> ModuleDefinition {
     Name("MySdk")
     Function("greet") { (name: String) -> String in
-      return "سلام \(name)"
+      "سلام \(name)"
     }
   }
 }
@@ -217,16 +255,92 @@ import { requireNativeModule } from 'expo-modules-core'
 const MySdk = requireNativeModule<{ greet(name: string): string }>('MySdk')
 ```
 
-> ماژول بومی با Expo Go کار نمی‌کند؛ نیاز به development build دارید: `npx expo run:ios` یا `npx expo run:android`.
+پس از افزودن ماژول بومی، Expo Go کافی نیست؛ باید development build بسازید.
 
-## ۸. عادت‌های حرفه‌ای
+## ۸. ساخت گام‌به‌گام گزارش خرابی شهری (تمرین)
 
-- هر مجوز را در یک Custom Hook بسته‌بندی کنید (`useCameraPermission`).
-- یک «حالت رد شده» طراحی کنید که اپ را بلاک نکند.
-- به‌جای polling برای موقعیت، از `watchPositionAsync` با فاصله‌ی زمانی معقول استفاده کنید.
-- مصرف باتری و داده را در README ذکر کنید.
-- تست روی دستگاه واقعی؛ شبیه‌ساز دوربین و GPS را کامل شبیه‌سازی نمی‌کند.
+**گام ۱ — مدل داده**
 
-## تمرین این درس
+```ts
+interface Report {
+  id: string
+  title: string
+  photoUri: string
+  location: { lat: number; lng: number } | null
+  createdAt: string
+}
+```
 
-اپ گزارش خرابی شهری: عکس با ImagePicker، موقعیت با expo-location، مدیریت کامل حالت رد شدن مجوز، ذخیره‌ی توکن با SecureStore و توضیح مجوزها در app.json. جزئیات در تب تمرین است.
+**گام ۲ — فرم:** عنوان، توضیح، دکمه‌ی عکس، دکمه‌ی «دریافت موقعیت»، دکمه‌ی ارسال.
+
+**گام ۳ — عکس:** `PhotoInput` بخش ۲ با مدیریت denied.
+
+**گام ۴ — موقعیت:** `getCoords` با مدیریت GPS خاموش و خطا؛ نمایش مختصات با ۵ رقم اعشار.
+
+**گام ۵ — ارسال:** بدون موقعیت هم اجازه بدهید اما هشدار بدهید («موقعیت ثبت نشد»).
+
+**گام ۶ — ذخیره‌ی محلی:** گزارش‌ها در AsyncStorage؛ توکن فرضی با SecureStore.
+
+**گام ۷ — اعلان:** بعد از ثبت، امکان یادآوری روزانه.
+
+**گام ۸ — تست:** مجوز را رد کنید و مطمئن شوید اپ کرش نمی‌کند؛ در تنظیمات فعال و برگردید.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `permissions` | بخش ۱ |
+| `camera` | بخش ۲ |
+| `location` | بخش ۳ |
+| `secure` | بخش ۵ |
+| `config` | بخش ۶ |
+
+## ۹. عیب‌یابی
+
+| مشکل | علت | راه‌حل |
+| --- | --- | --- |
+| مجوز هر بار پرسیده می‌شود | بدون بررسی `status` قبلی | وضعیت را بخوانید و فقط در نیاز بپرسید |
+| عکس پس از ری‌استارت نیست | URI کش موقت | کپی به حافظه‌ی دائمی |
+| موقعیت همیشه null | شبیه‌ساز بدون لوکیشن | تنظیم موقعیت شبیه‌ساز یا دستگاه واقعی |
+| اعلان نمی‌رسد | مجوز/کانال | مجوز + کانال Android |
+| SecureStore خطا | مقدار بزرگ | داده را کم کنید یا SQLite |
+| ماژول بومی پیدا نمی‌شود | Expo Go | development build |
+| متن مجوز رد شد | توضیح مبهم | بخش ۶ |
+
+## ۱۰. آزمایش‌ها (با پاسخ)
+
+**۱.** تفاوت `requestForegroundPermissionsAsync` و `requestBackgroundPermissionsAsync`؟
+
+**پاسخ:** اولی وقتی اپ باز است؛ دومی برای دریافت موقعیت در پس‌زمینه (مصرف باتری و سخت‌گیری بیشتر).
+
+**۲.** چرا بعد از `denied` دائمی نباید دوباره درخواست داد؟
+
+**پاسخ:** سیستم دیگر دیالوگ نشان نمی‌دهد؛ باید کاربر را به تنظیمات هدایت کرد.
+
+**۳.** چرا توکن را در AsyncStorage نگه نمی‌داریم؟
+
+**پاسخ:** بدون رمزنگاری است و در دستگاه روت/بکاپ قابل خواندن؛ SecureStore استفاده کنید.
+
+**۴.** چه زمانی Native Module می‌نویسیم؟
+
+**پاسخ:** وقتی API بومی لازم است و کتابخانه/ماژول آماده‌ای وجود ندارد (یا باید SDK داخلی را وصل کنیم).
+
+## ۱۱. خودآزمایی
+
+1. سه حالت مجوز و رفتار درست هر کدام؟
+2. چطور کیفیت/حجم عکس را کنترل می‌کنید؟
+3. تفاوت اعلان محلی و push؟
+4. SecureStore چه محدودیتی دارد؟
+5. Config Plugin چه کاری انجام می‌دهد؟
+6. چرا Expo Go برای ماژول بومی کافی نیست؟
+
+## ۱۲. چک‌لیست تحویل
+
+- [ ] درخواست مجوز در لحظه‌ی نیاز با متن مشخص
+- [ ] مدیریت `denied` و `canAskAgain: false`
+- [ ] عکس با پیش‌نمایش و خطا
+- [ ] موقعیت با GPS خاموش/خطا
+- [ ] توکن در SecureStore
+- [ ] متن مجوزها در app.json
+- [ ] بدون کرش در حالت رد مجوز
+- [ ] تست روی دستگاه واقعی برای دوربین/GPS

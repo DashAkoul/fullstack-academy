@@ -1,114 +1,162 @@
 # مبانی تایپ‌اسکریپت
 
-> مرجع اصلی: [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html)
+> مرجع اصلی: [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html) · [Everyday Types](https://www.typescriptlang.org/docs/handbook/2/everyday-types.html) · [Type Challenges](https://github.com/type-challenges/type-challenges)
 
-تایپ‌اسکریپت یک لایه‌ی تایپ روی جاوااسکریپت است که *قبل از اجرا* اشتباهات را پیدا می‌کند. تایپ‌ها در نهایت حذف می‌شوند؛ چیزی به خروجی اضافه نمی‌کنند.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. راه‌اندازی
+هدف این درس «اضافه کردن `:string` به کد» نیست؛ هدف این است که **مدل داده را با تایپ طراحی کنید** تا کامپایلر بخشی از تست‌های شما را انجام دهد. در پایان یک هسته‌ی سبد خرید با تایپ‌های دقیق، توابع بدون side effect، تخفیف‌های discriminated union و یک `groupBy` جنریک می‌نویسید.
 
-```bash
-npm create vite@latest my-app -- --template react-ts
-# یا دستی
-npm i -D typescript && npx tsc --init
+---
+
+## ۱. تایپ‌اسکریپت در یک نگاه
+
+```
+TS source ──tsc──▶ JavaScript + type checking
 ```
 
-`tsconfig.json` سخت‌گیرانه و مدرن:
+- تایپ‌ها فقط در زمان کامپایل وجود دارند؛ در خروجی حذف می‌شوند.
+- `tsc` دو کار می‌کند: بررسی تایپ و حذف تایپ‌ها (در Vite، esbuild تایپ‌ها را حذف می‌کند و `tsc --noEmit` جدا بررسی می‌کند).
+- تایپ‌اسکریپت **کافی نیست** برای داده‌ی خارجی؛ پاسخ API را باید در زمان اجرا اعتبارسنجی کنید (بخش ۹).
+
+```bash
+npm create vite@latest cart -- --template vanilla-ts
+npx tsc --noEmit          # بررسی بدون تولید فایل
+```
+
+## ۲. `tsconfig` سخت‌گیرانه: چرا هر فلگ مهم است
 
 ```json
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2023", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
-    "skipLibCheck": true,
-    "noEmit": true
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true
   }
 }
 ```
 
-`strict: true` مجموعه‌ای از بررسی‌ها (از جمله `strictNullChecks` و `noImplicitAny`) را فعال می‌کند. هرگز آن را خاموش نکنید.
+| فلگ | چه چیزی را می‌گیرد |
+| --- | --- |
+| `strict` | مجموعه‌ای شامل `strictNullChecks` و `noImplicitAny` |
+| `noUncheckedIndexedAccess` | `arr[0]` را `T \| undefined` می‌کند؛ منبع باگ‌های واقعی |
+| `exactOptionalPropertyTypes` | تفاوت `foo?: string` با `foo: string \| undefined` |
+| `verbatimModuleSyntax` | مجبور می‌کند `import type` را صریح بنویسید |
 
-## ۲. انواع پایه
+`strict` را هرگز خاموش نکنید. اگر روی کد قدیمی است، به‌تدریج فایل‌ها را با `// @ts-strict-ignore` جدا کنید، نه کل پروژه.
+
+## ۳. استنتاج (Inference) و انواع لیترال
 
 ```ts
-let title: string = 'آکادمی'
-let count: number = 42
-let active: boolean = true
-let tags: string[] = ['ts', 'react']
-let pair: [string, number] = ['age', 30]
-let anything: unknown = JSON.parse('{}')   // unknown امن است، any فرار از تایپ
+let title = 'آکادمی'        // string  (widening)
+const fixed = 'آکادمی'      // "آکادمی" (literal)
+const config = { mode: 'dark' }        // { mode: string }
+const config2 = { mode: 'dark' } as const  // { readonly mode: "dark" }
 ```
 
-`unknown` را قبل از استفاده باید narrow کنید؛ `any` همه‌ی محافظت‌ها را دور می‌زند.
+- `let` نوع را گسترده می‌کند، `const` لیترال را نگه می‌دارد.
+- `as const` همه چیز را `readonly` و لیترال می‌کند — عالی برای نقشه‌ی وضعیت‌ها.
+- `satisfies` بررسی می‌کند بدون از دست دادن نوع دقیق:
 
-## ۳. `interface` یا `type`؟
+```ts
+const routes = {
+  home: '/',
+  blog: '/blog'
+} satisfies Record<string, `/${string}`>
+
+type RouteName = keyof typeof routes // "home" | "blog"
+```
+
+## ۴. `interface` یا `type`؟
 
 ```ts
 interface User {
-  id: string
+  readonly id: string
   name: string
-  email?: string          // اختیاری
-  readonly createdAt: Date
+  email?: string
 }
 
-type UserId = string
 type Status = 'idle' | 'loading' | 'success' | 'error'
+type UserId = string
 ```
 
-- `interface` را برای شکل آبجکت‌ها و قراردادهای قابل گسترش (`extends`) بگیرید.
-- `type` را برای union، tuple، mapped type و ترکیب‌ها.
-- تفاوت عملی مهم: interface قابل declaration merging است؛ type نه.
+- `interface` برای شکل آبجکت و قرارداد قابل گسترش (`extends`، declaration merging).
+- `type` برای union، tuple، mapped/conditional type و ترکیب‌ها.
+- تفاوت عملکردی مهم: interface را می‌توان دوباره باز کرد و ادغام کرد؛ type نه.
 
-## ۴. Narrowing — قلب امنیت تایپ
+**آبجکت تودرتو را با تایپ جدا مدل کنید**؛ تایپ‌های خیلی بزرگ و تودرتو پیام‌های خطای وحشتناک می‌دهند.
+
+## ۵. Narrowing: قلب ایمنی تایپ
 
 ```ts
-function format(value: string | number): string {
-  if (typeof value === 'number') return value.toFixed(2)  // اینجا number است
-  return value.trim()                                     // اینجا string
-}
-
-function isUser(x: unknown): x is User {
-  return typeof x === 'object' && x !== null && 'id' in x
+function format(value: string | number | Date): string {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number') return value.toFixed(2)
+  return value.toISOString()             // اینجا Date است
 }
 ```
 
-روش‌های narrowing: `typeof`، `instanceof`، `in`، برابری، و **type predicate** برای داده‌های خارجی (پاسخ API).
-
-## ۵. Discriminated Union — الگوی طلایی مدل‌سازی
-
-به‌جای چند فیلد اختیاری که هر ترکیبی از آن‌ها ممکن است، حالت‌ها را صریح کن:
-
 ```ts
-type Discount =
-  | { kind: 'percent'; value: number }        // 0..100
-  | { kind: 'fixed'; amount: number }         // ریال
-  | { kind: 'buyXGetY'; buy: number; free: number }
+type Shape =
+  | { kind: 'circle'; r: number }
+  | { kind: 'rect'; w: number; h: number }
 
-function applyDiscount(total: number, d: Discount): number {
-  switch (d.kind) {
-    case 'percent':
-      return total - (total * d.value) / 100
-    case 'fixed':
-      return Math.max(0, total - d.amount)
-    case 'buyXGetY':
-      return total // محاسبه در سطح آیتم انجام می‌شود
+function area(shape: Shape): number {
+  switch (shape.kind) {
+    case 'circle':
+      return Math.PI * shape.r ** 2
+    case 'rect':
+      return shape.w * shape.h
     default: {
-      const _exhaustive: never = d
+      const _exhaustive: never = shape
       return _exhaustive
     }
   }
 }
 ```
 
-خط `never` باعث می‌شود اگر فردا حالت جدیدی اضافه کنید و اینجا را فراموش کنید، **کامپایل خطا بدهد**. این همان «بررسی جامعیت» است.
+خط `never` تضمین می‌کند اگر فردا `{kind:'triangle'}` اضافه کنید و اینجا را فراموش کنید، **کامپایل خطا بدهد**. این الگو را در همه‌ی switchهای وضعیت استفاده کنید.
 
-## ۶. Generics
+**Type predicate برای داده‌ی خارجی:**
 
 ```ts
-function groupBy<T, K extends PropertyKey>(items: T[], keyOf: (item: T) => K): Record<K, T[]> {
+function isUser(value: unknown): value is User {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    typeof (value as { id: unknown }).id === 'string'
+  )
+}
+```
+
+**Assertion function:**
+
+```ts
+function assertUser(value: unknown): asserts value is User {
+  if (!isUser(value)) throw new Error('داده‌ی کاربر نامعتبر است')
+}
+```
+
+## ۶. Generics: تایپ را پارامتر بگیر
+
+```ts
+function first<T>(items: readonly T[]): T | undefined {
+  return items[0]
+}
+
+function groupBy<T, K extends PropertyKey>(
+  items: readonly T[],
+  keyOf: (item: T) => K
+): Record<K, T[]> {
   const out = {} as Record<K, T[]>
   for (const item of items) {
     const key = keyOf(item)
@@ -117,70 +165,229 @@ function groupBy<T, K extends PropertyKey>(items: T[], keyOf: (item: T) => K): R
   return out
 }
 
-const byCategory = groupBy(products, (p) => p.category)
-// نوع: Record<string, Product[]>
+const byCategory = groupBy(products, (p) => p.category) // Record<Category, Product[]>
 ```
 
-Generic یعنی «تایپ را به‌عنوان پارامتر بگیر» تا کد هم بازاستفاده شود، هم تایپ‌امن بماند.
+قواعد:
 
-قواعد وابستگی با `extends`:
+- `K extends PropertyKey` تضمین می‌کند کلید قابل استفاده در آبجکت باشد.
+- برای آرایه‌ی ورودی `readonly T[]` بنویسید تا تابع با آرایه‌ی readonly هم کار کند.
+- Generic را وقتی استفاده کنید که **رابطه‌ی بین ورودی و خروجی** مهم است؛ برای `any` تایپ‌دار استفاده نکنید.
 
 ```ts
-function pick<T, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> { /* ... */ }
+async function getJson<T>(url: string, parse: (v: unknown) => T): Promise<T> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return parse(await res.json())
+}
 ```
 
-## ۷. Utility Types
+## ۷. Utility Types و اپراتورهای تایپ
 
 ```ts
-type UserUpdate = Partial<User>              // همه اختیاری
-type UserPreview = Pick<User, 'id' | 'name'> // فقط چند فیلد
-type UserWithoutEmail = Omit<User, 'email'>  // حذف فیلد
-type UsersById = Record<string, User>        // نقشه
-type ReadonlyUser = Readonly<User>           // غیرقابل تغییر
-type NonNullUser = NonNullable<User | null>
+type UserUpdate = Partial<User>
+type UserPreview = Pick<User, 'id' | 'name'>
+type UserNoEmail = Omit<User, 'email'>
+type UsersById = Record<string, User>
+type ReadonlyUser = Readonly<User>
+type MaybeUser = NonNullable<User | null | undefined>
 ```
-
-## ۸. کار با DOM و `strict`
 
 ```ts
-const form = document.querySelector<HTMLFormElement>('#search')
-if (!form) throw new Error('فرم پیدا نشد')
-
-form.addEventListener('submit', (event) => {
-  event.preventDefault()
-  const data = new FormData(form)
-  const q = String(data.get('q') ?? '').trim()
-})
+type Keys = keyof User                 // "id" | "name" | "email"
+type NameType = User['name']           // string
+type UserMap = { [K in keyof User]: User[K][] }   // mapped
+type OnlyStrings = Extract<string | number, string> // string
+type WithoutNull = Exclude<string | null, null>     // string
 ```
 
-با `strictNullChecks`، `querySelector` می‌تواند `null` باشد؛ بررسی‌اش وظیفه‌ی شماست — و همین منشأ بسیاری از باگ‌های واقعی است.
+این‌ها را زیاد استفاده می‌کنید: `Partial` در به‌روزرسانی، `Pick/Omit` در DTO، `Record` در نقشه‌ها.
 
-## ۹. تایپ داده‌ی خارجی: `unknown` + Zod
+## ۸. `unknown` در برابر `any`
 
-پاسخ API قابل اعتماد نیست. `as User` نوشتن یعنی دروغ گفتن به کامپایلر.
+| | `any` | `unknown` |
+| --- | --- | --- |
+| اجازه‌ی هر کاری | ✅ | ❌ تا narrow نشود |
+| ایمنی | از بین می‌رود | حفظ می‌شود |
+| کاربرد | کد قدیمی/escape hatch | داده‌ی خارجی |
+
+```ts
+const data: unknown = JSON.parse(input)
+// data.name ❌
+if (isUser(data)) console.log(data.name) // ✅
+```
+
+هر بار که `as SomeType` روی پاسخ API می‌نویسید، به کامپایلر دروغ گفته‌اید. از schema validation استفاده کنید.
+
+## ۹. مرز واقعی: اعتبارسنجی داده‌ی شبکه با Zod
 
 ```ts
 import { z } from 'zod'
 
-const UserSchema = z.object({
-  id: z.number(),
-  login: z.string(),
-  public_repos: z.number()
+export const ProductSchema = z.object({
+  id: z.string().uuid(),
+  title: z.string().min(1),
+  price: z.number().int().nonnegative(),
+  category: z.enum(['book', 'course', 'tool'])
 })
 
-const user = UserSchema.parse(await res.json()) // اگر شکل داده غلط باشد، خطا می‌دهد
+export type Product = z.infer<typeof ProductSchema>
+
+export function parseProducts(input: unknown): Product[] {
+  const result = z.array(ProductSchema).safeParse(input)
+  if (!result.success) {
+    console.error(result.error.issues)
+    throw new Error('ساختار پاسخ API نامعتبر است')
+  }
+  return result.data
+}
 ```
 
-## ۱۰. خطاهای رایج تازه‌کارها
+تایپ را از schema بگیرید تا یک منبع حقیقت داشته باشید.
 
-| خطا | راه‌حل |
+## ۱۰. ساخت گام‌به‌گام هسته‌ی سبد خرید (تمرین)
+
+**گام ۱ — مدل داده**
+
+```ts
+export interface Product {
+  readonly id: string
+  readonly title: string
+  readonly price: number
+  readonly category: string
+}
+
+export interface CartItem {
+  readonly product: Product
+  readonly quantity: number
+}
+
+export interface Cart {
+  readonly items: readonly CartItem[]
+}
+```
+
+**گام ۲ — توابع بدون تغییر ورودی**
+
+```ts
+export function addItem(cart: Cart, product: Product, quantity = 1): Cart {
+  const existing = cart.items.find((i) => i.product.id === product.id)
+  if (existing) {
+    return {
+      items: cart.items.map((i) =>
+        i.product.id === product.id ? { ...i, quantity: i.quantity + quantity } : i
+      )
+    }
+  }
+  return { items: [...cart.items, { product, quantity }] }
+}
+
+export function updateQuantity(cart: Cart, id: string, quantity: number): Cart {
+  const next = Math.max(0, Math.trunc(quantity))
+  return {
+    items: cart.items
+      .map((i) => (i.product.id === id ? { ...i, quantity: next } : i))
+      .filter((i) => i.quantity > 0)
+  }
+}
+```
+
+**گام ۳ — تخفیف‌ها به‌صورت discriminated union**
+
+```ts
+export type Discount =
+  | { kind: 'percent'; value: number }
+  | { kind: 'fixed'; amount: number }
+  | { kind: 'buyXGetY'; buy: number; free: number }
+
+export function applyDiscount(subtotal: number, discount: Discount): number {
+  switch (discount.kind) {
+    case 'percent':
+      return Math.round(subtotal * (1 - clamp(discount.value, 0, 100) / 100))
+    case 'fixed':
+      return Math.max(0, subtotal - discount.amount)
+    case 'buyXGetY':
+      return subtotal // در سطح آیتم اعمال می‌شود
+    default: {
+      const _never: never = discount
+      return _never
+    }
+  }
+}
+```
+
+**گام ۴ — جمع کل و `groupBy`**
+
+```ts
+export const subtotal = (cart: Cart): number =>
+  cart.items.reduce((sum, i) => sum + i.product.price * i.quantity, 0)
+
+const byCategory = groupBy(cart.items, (i) => i.product.category)
+// Record<string, CartItem[]>
+```
+
+**گام ۵ — تست**: با Vitest یا حتی `node --test`؛ موارد مرزی: سبد خالی، quantity صفر، تخفیف ۱۲۰٪، تخفیف بیشتر از جمع.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
 | --- | --- |
-| استفاده از `any` برای ساکت کردن کامپایلر | `unknown` + narrowing |
-| `as SomeType` روی داده‌ی شبکه | schema validation |
-| `!` غیرضروری (`user!.name`) | بررسی واقعی `if (!user) return` |
-| unionهای بی‌شمار به‌جای یک discriminated union | فیلد `kind`/`type` اضافه کنید |
-| تایپ‌های تکراری در چند فایل | یک فایل `types.ts` مشترک |
+| `strict` | بخش ۲ |
+| `types` | بخش ۳ تا ۵ و گام ۱ |
+| `union` | بخش ۵ و گام ۳ |
+| `generic` | بخش ۶ و گام ۴ |
+| `immutable` | گام ۲ |
+| `utility` | بخش ۷ |
 
-## تمرین این درس
+## ۱۱. خطاهای پرتکرار کامپایلر و ریشه‌شان
 
-هسته‌ی سبد خرید یک فروشگاه را با تایپ‌اسکریپت strict بنویسید: انواع Product/CartItem/Cart، توابع immutable، تخفیف به‌صورت discriminated union با بررسی exhaustive، و یک `groupBy` جنریک. جزئیات در تب تمرین است.
+| پیام | معنا | راه‌حل |
+| --- | --- | --- |
+| `Type 'X' is not assignable to type 'Y'` | شکل داده مطابق قرارداد نیست | interface یا داده را اصلاح کنید، نه `as` |
+| `Object is possibly 'undefined'` | `strictNullChecks` | بررسی واقعی `if (!x) return` یا مقدار پیش‌فرض |
+| `Property does not exist on type 'unknown'` | داده‌ی خارجی | type guard/schema |
+| `Argument of type ... not assignable` | امضای تابع | پارامتر را دقیق تایپ کنید |
+| `Cannot find module './x'` | مسیر/پسوند/`paths` | `moduleResolution` و `paths` را هم‌راستا کنید |
+| `Conversion of type ... may be a mistake` | `as` ناسازگار | ابتدا `unknown` سپس guard |
+
+## ۱۲. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا `const user: User = { id: 1 }` خطا می‌دهد ولی `const user = { id: 1 }` نه؟
+
+**پاسخ:** در حالت اول قرارداد `User` اعمال می‌شود و `id` باید string باشد؛ در حالت دوم فقط استنتاج است.
+
+**۲.** این تابع چه تایپی برمی‌گرداند و چرا؟
+
+```ts
+function pick<T, K extends keyof T>(obj: T, keys: K[]): Pick<T, K>
+```
+
+**پاسخ:** آبجکتی با فقط کلیدهای داده‌شده و همان تایپ مقادیر؛ `K` تضمین می‌کند کلید ناموجود قابل ارسال نیست.
+
+**۳.** چرا `if (err instanceof Error)` بهتر از `catch (err: any)` است؟
+
+**پاسخ:** چون تایپ را narrow می‌کند و امکان بررسی امن `err.message` می‌دهد؛ در TS 4.4+ `useUnknownInCatchVariables` این را پیش‌فرض می‌کند.
+
+**۴.** چه تفاوتی بین `readonly string[]` و `ReadonlyArray<string>` هست؟
+
+**پاسخ:** هر دو یک معنا دارند؛ `readonly T[]` سینتکس کوتاه است. آرایه‌ی readonly متدهای تغییردهنده ندارد.
+
+## ۱۳. خودآزمایی
+
+1. `unknown` را چرا به `any` ترجیح می‌دهیم؟
+2. `never` در بررسی exhaustive چه نقشی دارد؟
+3. چه زمانی `interface` و چه زمانی `type`؟
+4. `satisfies` چه مشکلی را حل می‌کند؟
+5. چرا `noUncheckedIndexedAccess` باگ‌های واقعی را کم می‌کند؟
+6. تفاوت `Partial<T>` و `Readonly<Partial<T>>`؟
+
+## ۱۴. چک‌لیست تحویل
+
+- [ ] `strict: true` و بدون `any` غیرضروری
+- [ ] انواع دامنه با `interface`/`type` و `readonly` مناسب
+- [ ] تخفیف به‌صورت discriminated union با بررسی `never`
+- [ ] `groupBy` جنریک با `K extends PropertyKey`
+- [ ] توابع سبد خرید ورودی را تغییر نمی‌دهند
+- [ ] حداقل یک utility type
+- [ ] اعتبارسنجی ورودی/پاسخ API (Zod یا معادل)
+- [ ] تست موارد مرزی

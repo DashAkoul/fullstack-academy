@@ -1,289 +1,364 @@
-# NestJS: معماری ماژولار بک‌اند
+# NestJS: معماری ماژولار
 
-> مرجع رسمی: [docs.nestjs.com](https://docs.nestjs.com/)
+> مراجع: [NestJS Docs](https://docs.nestjs.com/) · [Modules](https://docs.nestjs.com/modules) · [Pipes](https://docs.nestjs.com/pipes) · [Testing](https://docs.nestjs.com/fundamentals/testing)
 
-NestJS یک فریم‌ورک «نظرپذیر» (opinionated) است: ساختار مشخص، تزریق وابستگی، و الگوهای جاافتاده. برای تیم‌های متوسط و بزرگ انتخاب پیش‌فرض معقولی است.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. ساخت پروژه
+می‌فهمید چرا Nest برای تیم‌های بزرگ انتخاب می‌شود: ماژول‌ها، تزریق وابستگی، DTO، Pipe/Guard/Interceptor/Filter و تست. در پایان، API وظایف را با ساختار ماژولار، اعتبارسنجی، احراز هویت نقش‌محور و تست e2e می‌سازید.
 
-```bash
-npm i -g @nestjs/cli
-nest new clinic-booking
-cd clinic-booking && npm run start:dev
-```
+---
 
-```
-src/
-├─ app.module.ts        ← ریشه
-├─ main.ts
-└─ appointments/
-   ├─ appointments.module.ts
-   ├─ appointments.controller.ts
-   ├─ appointments.service.ts
-   ├─ dto/
-   └─ entities/
-```
+## ۱. سه بلوک اصلی
 
-## ۲. سه مفهوم اصلی
-
-| مفهوم | مسئولیت |
-| --- | --- |
-| **Module** | مرز و دامنه؛ چه چیزهایی را عرضه/ایمپورت می‌کند |
-| **Controller** | لایه‌ی HTTP؛ مسیر، ورودی، خروجی |
-| **Provider/Service** | منطق و وابستگی‌ها؛ تست‌پذیر |
+| بلوک | نقش | مثال |
+| --- | --- | --- |
+| Module | مرز و ترکیب | `TasksModule` |
+| Controller | لایه‌ی HTTP | `TasksController` |
+| Provider (Service) | منطق/دسترسی داده | `TasksService` |
 
 ```ts
-// appointments.module.ts
+// src/tasks/tasks.module.ts
 import { Module } from '@nestjs/common'
-import { AppointmentsController } from './appointments.controller'
-import { AppointmentsService } from './appointments.service'
+import { TasksController } from './tasks.controller'
+import { TasksService } from './tasks.service'
+import { PrismaModule } from '../prisma/prisma.module'
 
 @Module({
-  controllers: [AppointmentsController],
-  providers: [AppointmentsService],
-  exports: [AppointmentsService]
+  imports: [PrismaModule],
+  controllers: [TasksController],
+  providers: [TasksService],
+  exports: [TasksService]
 })
-export class AppointmentsModule {}
+export class TasksModule {}
 ```
 
-## ۳. Controller و Service
+`exports` فقط چیزی را که می‌خواهید ماژول‌های دیگر استفاده کنند صادر می‌کند. اگر `TasksService` را export نکنید، ماژول دیگر نمی‌تواند inject کند.
+
+## ۲. تزریق وابستگی
 
 ```ts
-// appointments.controller.ts
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
-import { AppointmentsService } from './appointments.service'
-import { CreateAppointmentDto } from './dto/create-appointment.dto'
-import { UpdateAppointmentDto } from './dto/update-appointment.dto'
-import { AdminGuard } from '../auth/admin.guard'
-
-@Controller('appointments')
-export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}  // DI
-
-  @Get()
-  findAll() {
-    return this.service.findAll()
-  }
-
-  @Post()
-  create(@Body() dto: CreateAppointmentDto) {
-    return this.service.create(dto)
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateAppointmentDto) {
-    return this.service.update(id, dto)
-  }
-
-  @UseGuards(AdminGuard)
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.service.remove(id)
-  }
-}
-```
-
-```ts
-// appointments.service.ts
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common'
-import { CreateAppointmentDto } from './dto/create-appointment.dto'
-
-export interface Appointment {
-  id: string
-  doctorId: string
-  patientName: string
-  startsAt: Date
-  endsAt: Date
-}
-
 @Injectable()
-export class AppointmentsService {
-  private readonly items: Appointment[] = []
+export class TasksService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+    @Inject('CLOCK') private readonly clock: Clock
+  ) {}
 
-  findAll(doctorId?: string) {
-    return doctorId ? this.items.filter((a) => a.doctorId === doctorId) : this.items
-  }
-
-  create(dto: CreateAppointmentDto): Appointment {
-    const startsAt = new Date(dto.startsAt)
-    const endsAt = new Date(startsAt.getTime() + dto.durationMinutes * 60_000)
-
-    const conflict = this.items.some(
-      (a) => a.doctorId === dto.doctorId && startsAt < a.endsAt && a.startsAt < endsAt
-    )
-    if (conflict) throw new ConflictException('این بازه برای پزشک قبلاً رزرو شده است')
-
-    const appointment: Appointment = {
-      id: crypto.randomUUID(),
-      doctorId: dto.doctorId,
-      patientName: dto.patientName,
-      startsAt,
-      endsAt
-    }
-    this.items.push(appointment)
-    return appointment
-  }
-
-  remove(id: string) {
-    const index = this.items.findIndex((a) => a.id === id)
-    if (index === -1) throw new NotFoundException('نوبت پیدا نشد')
-    return this.items.splice(index, 1)[0]
+  findAll(ownerId: string) {
+    return this.prisma.task.findMany({ where: { ownerId }, orderBy: { createdAt: 'desc' } })
   }
 }
 ```
 
-> دو بازه‌ی `[aStart, aEnd)` و `[bStart, bEnd)` زمانی تداخل دارند که `aStart < bEnd && bStart < aEnd`. این یک تست واحد ارزشمند است.
-
-## ۴. DTO و ValidationPipe
-
-```bash
-npm i class-validator class-transformer
-```
+- Nest خودش نمونه می‌سازد و تزریق می‌کند؛ `new` نکنید.
+- برای تست، provider را با fake جایگزین می‌کنید — همین دلیل اصلی DI است.
+- provider سفارشی:
 
 ```ts
-// dto/create-appointment.dto.ts
-import { IsInt, IsISO8601, IsString, Length, Max, Min } from 'class-validator'
+@Module({
+  providers: [
+    { provide: 'CLOCK', useValue: { now: () => new Date() } },
+    {
+      provide: 'MAILER',
+      useFactory: (cfg: ConfigService) => new Mailer(cfg.getOrThrow('MAIL_URL')),
+      inject: [ConfigService]
+    }
+  ]
+})
+```
 
-export class CreateAppointmentDto {
+## ۳. DTO و ValidationPipe
+
+```ts
+// src/tasks/dto/create-task.dto.ts
+import { IsEnum, IsISO8601, IsOptional, IsString, Length } from 'class-validator'
+import { Transform } from 'class-transformer'
+
+export enum Priority { Low = 'low', Medium = 'medium', High = 'high' }
+
+export class CreateTaskDto {
   @IsString()
-  @Length(1, 64)
-  doctorId!: string
+  @Length(2, 120)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  title!: string
 
+  @IsOptional()
   @IsString()
-  @Length(2, 80)
-  patientName!: string
+  @Length(0, 2000)
+  description?: string
 
+  @IsOptional()
+  @IsEnum(Priority)
+  priority?: Priority
+
+  @IsOptional()
   @IsISO8601()
-  startsAt!: string
-
-  @IsInt()
-  @Min(5)
-  @Max(240)
-  durationMinutes!: number
+  dueDate?: string
 }
 ```
 
 ```ts
 // main.ts
-import { ValidationPipe } from '@nestjs/common'
-import { NestFactory } from '@nestjs/core'
-import { AppModule } from './app.module'
-
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule)
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,             // حذف فیلدهای تعریف‌نشده
-      forbidNonWhitelisted: true,  // یا خطا دادن
-      transform: true,             // تبدیل نوع خودکار
-      transformOptions: { enableImplicitConversion: false }
-    })
-  )
-  app.enableCors({ origin: process.env.CORS_ORIGIN?.split(',') })
-  await app.listen(process.env.PORT ?? 3000)
-}
-void bootstrap()
+app.useGlobalPipes(new ValidationPipe({
+  whitelist: true,            // فیلدهای اضافه حذف
+  forbidNonWhitelisted: true, // یا خطا
+  transform: true,
+  transformOptions: { enableImplicitConversion: false }
+}))
 ```
 
-## ۵. Guard
+`whitelist` جلوی mass-assignment را می‌گیرد؛ بدون آن کاربر می‌تواند `ownerId` یا `role` بفرستد.
+
+## ۴. Controller
 
 ```ts
-// auth/admin.guard.ts
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common'
-import type { Request } from 'express'
+@Controller('tasks')
+@UseGuards(JwtAuthGuard)
+export class TasksController {
+  constructor(private readonly tasks: TasksService) {}
 
-@Injectable()
-export class AdminGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const req = context.switchToHttp().getRequest<Request>()
-    const key = req.header('x-api-key')
-    if (!key) throw new UnauthorizedException('کلید دسترسی لازم است')
-    if (key !== process.env.ADMIN_API_KEY) throw new UnauthorizedException('کلید نامعتبر')
-    return true
+  @Get()
+  list(@CurrentUser() user: AuthUser, @Query() query: ListTasksDto) {
+    return this.tasks.list(user.id, query)
+  }
+
+  @Get(':id')
+  async get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    const task = await this.tasks.get(user.id, id)
+    if (!task) throw new NotFoundException('وظیفه یافت نشد.')
+    return task
+  }
+
+  @Post()
+  @HttpCode(201)
+  create(@Body() dto: CreateTaskDto, @CurrentUser() user: AuthUser) {
+    return this.tasks.create(user.id, dto)
+  }
+
+  @Patch(':id')
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateTaskDto, @CurrentUser() user: AuthUser) {
+    return this.tasks.update(user.id, id, dto)
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    await this.tasks.remove(user.id, id)
   }
 }
 ```
 
-به‌جای تکرار در کنترلرها، می‌توانید آن را در سطح ماژول/کنترلر یا با `APP_GUARD` سراسری اعمال کنید.
+`ParseUUIDPipe` قبل از رسیدن به سرویس، ورودی بد را ۴۰۰ می‌کند.
 
-## ۶. تست واحد
+**Exceptionهای داخلی Nest** کد وضعیت درست را خودکار می‌سازند؛ بدنه‌ی خطا را دستی نسازید:
 
 ```ts
-// appointments.service.spec.ts
-import { Test } from '@nestjs/testing'
-import { ConflictException } from '@nestjs/common'
-import { AppointmentsService } from './appointments.service'
+try {
+  return await this.tasks.create(user.id, dto)
+} catch (err) {
+  if (isUniqueViolation(err)) throw new ConflictException('این عنوان قبلاً ثبت شده است.')
+  throw err
+}
 
-describe('AppointmentsService', () => {
-  let service: AppointmentsService
+// NotFoundException → 404، ConflictException → 409، ForbiddenException → 403,
+// UnauthorizedException → 401، BadRequestException → 400
+```
 
-  beforeEach(async () => {
-    const moduleRef = await Test.createTestingModule({
-      providers: [AppointmentsService]
-    }).compile()
-    service = moduleRef.get(AppointmentsService)
-  })
+## ۵. ترتیب اجرای درخواست
 
-  it('در صورت تداخل بازه، ConflictException می‌دهد', () => {
-    service.create({
-      doctorId: 'd1',
-      patientName: 'علی',
-      startsAt: '2030-01-01T10:00:00.000Z',
-      durationMinutes: 30
+```
+Middleware → Guards → Interceptors (قبل) → Pipes → Handler
+          → Interceptors (بعد) → Exception Filters
+```
+
+- **Guard**: اجازه/رد (auth، نقش).
+- **Pipe**: تبدیل/اعتبارسنجی ورودی.
+- **Interceptor**: تغییر پاسخ، زمان‌سنجی، تبدیل خروجی.
+- **Filter**: قالب یکدست خطا.
+
+```ts
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+  canActivate(ctx: ExecutionContext): boolean {
+    const roles = this.reflector.getAllAndOverride<string[]>('roles', [ctx.getHandler(), ctx.getClass()])
+    if (!roles?.length) return true
+    const { user } = ctx.switchToHttp().getRequest()
+    return roles.includes(user?.role)
+  }
+}
+```
+
+## ۶. فیلتر خطای یکدست
+
+```ts
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name)
+
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp()
+    const res = ctx.getResponse<Response>()
+    const req = ctx.getRequest<Request>()
+
+    const status = exception instanceof HttpException ? exception.getStatus() : 500
+    const body = exception instanceof HttpException ? exception.getResponse() : null
+
+    if (status >= 500) this.logger.error({ exception }, req.url)
+
+    res.status(status).json({
+      error: {
+        code: status >= 500 ? 'INTERNAL' : 'REQUEST_ERROR',
+        message: status >= 500 ? 'خطای سرور.' : body,
+        path: req.url,
+        requestId: req.headers['x-request-id'] ?? null
+      }
     })
-
-    expect(() =>
-      service.create({
-        doctorId: 'd1',
-        patientName: 'سارا',
-        startsAt: '2030-01-01T10:15:00.000Z',
-        durationMinutes: 30
-      })
-    ).toThrow(ConflictException)
-  })
-
-  it('پزشک دیگر در همان زمان آزاد است', () => {
-    service.create({ doctorId: 'd1', patientName: 'علی', startsAt: '2030-01-01T10:00:00.000Z', durationMinutes: 30 })
-    expect(() =>
-      service.create({ doctorId: 'd2', patientName: 'سارا', startsAt: '2030-01-01T10:00:00.000Z', durationMinutes: 30 })
-    ).not.toThrow()
-  })
-})
-```
-
-## ۷. پیکربندی و ماژول‌های آماده
-
-```bash
-npm i @nestjs/config
+  }
+}
 ```
 
 ```ts
-import { ConfigModule } from '@nestjs/config'
-import { z } from 'zod'
+app.useGlobalFilters(new AllExceptionsFilter())
+```
 
+## ۷. پیکربندی با اعتبارسنجی
+
+```ts
+// app.module.ts
 ConfigModule.forRoot({
   isGlobal: true,
-  validate: (raw) =>
-    z.object({
-      PORT: z.coerce.number().default(3000),
-      DATABASE_URL: z.string().url(),
-      ADMIN_API_KEY: z.string().min(16)
-    }).parse(raw)
+  validationSchema: Joi.object({
+    NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
+    PORT: Joi.number().default(3000),
+    DATABASE_URL: Joi.string().uri().required(),
+    JWT_SECRET: Joi.string().min(32).required()
+  })
 })
 ```
 
-اکوسیستم Nest: `@nestjs/typeorm`, `@nestjs/mongoose`, `@nestjs/prisma` (غیررسمی), `@nestjs/graphql`, `@nestjs/bull` (صف), `@nestjs/swagger`.
+برنامه در شروع با env ناقص **fail-fast** می‌شود؛ خیلی بهتر از خطای نیمه‌شب در production.
 
-## ۸. Express یا Nest؟
+## ۸. تست: unit و e2e
 
-| معیار | Express | NestJS |
+```ts
+// tasks.service.spec.ts
+describe('TasksService', () => {
+  let service: TasksService
+  const prisma = { task: { findMany: vi.fn(), create: vi.fn() } }
+
+  beforeEach(async () => {
+    const module = await Test.createTestingModule({
+      providers: [TasksService, { provide: PrismaService, useValue: prisma }]
+    }).compile()
+    service = module.get(TasksService)
+  })
+
+  it('فقط وظایف مالک را برمی‌گرداند', async () => {
+    prisma.task.findMany.mockResolvedValue([])
+    await service.findAll('user-1')
+    expect(prisma.task.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { ownerId: 'user-1' } })
+    )
+  })
+})
+```
+
+```ts
+// test/tasks.e2e-spec.ts
+it('/tasks (GET) بدون توکن → 401', () =>
+  request(app.getHttpServer()).get('/tasks').expect(401))
+
+it('POST با عنوان کوتاه → 400', () =>
+  request(app.getHttpServer())
+    .post('/tasks')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ title: 'a' })
+    .expect(400))
+```
+
+## ۹. ساخت گام‌به‌گام API وظایف (تمرین)
+
+**گام ۱ — پروژه**
+
+```bash
+npm i -g @nestjs/cli
+nest new tasks-api --strict
+nest g module tasks && nest g controller tasks && nest g service tasks
+```
+
+**گام ۲ — Prisma:** `PrismaModule` global، مدل `Task` با `ownerId`.
+
+**گام ۳ — DTOها** با class-validator و `ValidationPipe` سراسری.
+
+**گام ۴ — سرویس:** list/get/create/update/remove با فیلتر `ownerId`.
+
+**گام ۵ — کنترلر:** مسیرها، `ParseUUIDPipe`، `HttpCode`، `Location` در صورت نیاز.
+
+**گام ۶ — auth:** `JwtAuthGuard`، دکوراتور `@CurrentUser`، نقش `admin` با `RolesGuard`.
+
+**گام ۷ — خطا:** فیلتر سراسری، `NotFoundException` و `ConflictException` برای داده‌ی تکراری.
+
+**گام ۸ — تست:** unit برای سرویس با mock، e2e برای ۴۰۱/۴۰۰/۲۰۱.
+
+**گام ۹ — مستندسازی:** `@nestjs/swagger` و `/docs`.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `modules` | بخش ۱ |
+| `dto` | بخش ۳ |
+| `exceptions` | بخش ۴ (Exceptionهای HTTP) و بخش ۶ |
+| `guard` | بخش ۵ |
+| `tests` | بخش ۸ |
+
+## ۱۰. عیب‌یابی
+
+| خطا | علت | راه‌حل |
 | --- | --- | --- |
-| شروع سریع | ✅ | متوسط |
-| ساختار تیمی | خودتان می‌سازید | از پیش تعریف‌شده |
-| تزریق وابستگی | ندارد | ✅ |
-| منحنی یادگیری | کم | بیشتر |
-| مناسب | API کوچک، سرویس ساده | دامنه‌ی پیچیده، تیم بزرگ |
+| `Nest can't resolve dependencies` | provider در module ثبت نشده | providers/imports |
+| اعتبارسنجی اجرا نمی‌شود | `ValidationPipe` ثبت نشده | `useGlobalPipes` |
+| فیلد اضافه پذیرفته می‌شود | بدون `whitelist` | بخش ۳ |
+| `401` حتی با توکن | guard/strategy | ترتیب و secret |
+| تست به DB واقعی می‌زند | mock نکردن | useValue |
+| env ناقص در runtime | بدون validationSchema | بخش ۷ |
 
-## تمرین این درس
+## ۱۱. آزمایش‌ها (با پاسخ)
 
-ماژول نوبت‌دهی کلینیک در NestJS: DTO با class-validator، ValidationPipe سراسری، جلوگیری از تداخل با ConflictException، Guard با `x-api-key` و تست واحد منطق تداخل. جزئیات در تب تمرین است.
+**۱.** چرا `exports` لازم است؟
+
+**پاسخ:** provider فقط داخل ماژول خودش قابل inject است مگر export شود.
+
+**۲.** تفاوت Guard و Pipe؟
+
+**پاسخ:** Guard اجازه‌ی دسترسی؛ Pipe تبدیل/اعتبارسنجی داده.
+
+**۳.** `whitelist: true` چه خطری را رفع می‌کند؟
+
+**پاسخ:** mass assignment؛ فیلدهای ناخواسته مثل `role` حذف می‌شوند.
+
+**۴.** چرا تست سرویس با mock از e2e سریع‌تر است؟
+
+**پاسخ:** بدون HTTP/DB؛ فقط منطق. e2e برای مسیرهای حیاتی.
+
+## ۱۲. خودآزمایی
+
+1. Module، Controller، Provider چه تفاوتی دارند؟
+2. DI چه فایده‌ای برای تست دارد؟
+3. ترتیب Guard/Pipe/Interceptor/Filter؟
+4. چطور نقش‌محور دسترسی می‌دهید؟
+5. چرا env باید در شروع اعتبارسنجی شود؟
+6. تفاوت unit و e2e در Nest؟
+
+## ۱۳. چک‌لیست تحویل
+
+- [ ] ساختار module/controller/service
+- [ ] DTO با class-validator و whitelist
+- [ ] Guard و دکوراتور کاربر
+- [ ] فیلتر خطای یکدست
+- [ ] ConfigModule با validation
+- [ ] تست unit + e2e
+- [ ] Swagger در `/docs`
+- [ ] بدون منطق در controller

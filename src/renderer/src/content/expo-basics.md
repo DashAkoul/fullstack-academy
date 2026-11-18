@@ -1,139 +1,174 @@
 # React Native و Expo: مبانی
 
-> مراجع: [Expo Docs](https://docs.expo.dev/) · [React Native Docs](https://reactnative.dev/docs/getting-started)
+> مراجع: [Expo Docs](https://docs.expo.dev/) · [React Native Docs](https://reactnative.dev/docs/getting-started) · [Expo Router](https://docs.expo.dev/router/introduction/)
 
-React Native کامپوننت‌های React را به ویوهای بومی (native views) تبدیل می‌کند. Expo لایه‌ی ابزاری است که ساخت، اجرا و انتشار را بدون دردسر Xcode/Android Studio اولیه فراهم می‌کند.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. شروع پروژه
+می‌فهمید React Native چه چیزی را به‌طور واقعی رندر می‌کند، تفاوت‌های کلیدی با وب چیست و چطور یک اپ قابل اجرا روی iOS و Android بسازید: لیست بهینه، فرم، ذخیره‌سازی محلی، Safe Area و استایل‌دهی. در پایان، اپ ردیاب عادت تمرین را روی گوشی/شبیه‌ساز اجرا می‌کنید.
+
+---
+
+## ۱. Expo Go یا Development Build؟
+
+| | Expo Go | Development Build |
+| --- | --- | --- |
+| شروع | فوری (QR) | نیاز به بیلد بومی |
+| کتابخانه‌های بومی سفارشی | ❌ | ✅ |
+| مناسب | آموزش و اپ‌های استاندارد | پروژه‌ی واقعی |
 
 ```bash
 npx create-expo-app@latest habit-tracker --template default
 cd habit-tracker
-npx expo start        # سپس i برای iOS، a برای Android، w برای وب
+npx expo start
 ```
 
-برای اجرا روی گوشی واقعی: اپ **Expo Go** را نصب کنید و QR کد را اسکن کنید.
+سپس `a` برای Android، `i` برای iOS (فقط مک) و `w` برای وب. برای گوشی واقعی، Expo Go را نصب و QR را اسکن کنید.
 
-ساختار پیش‌فرض (با Expo Router):
-
-```
-app/                 ← مسیرها (Expo Router)
-├─ _layout.tsx
-└─ (tabs)/
-   ├─ _layout.tsx
-   └─ index.tsx
-components/
-constants/
+```bash
+npx expo install expo-image-picker   # همیشه با expo install تا نسخه سازگار SDK
+npx expo doctor                      # بررسی ناسازگاری نسخه‌ها
 ```
 
-## ۲. تفاوت‌های کلیدی با وب
+## ۲. React Native چه چیزی را رندر می‌کند؟
+
+React همان مدل رندر را دارد، اما به‌جای DOM، دستورهایی به ویوهای بومی می‌فرستد: `View` → `UIView`/`android.view.View`، `Text` → `UILabel`/`TextView`.
 
 | وب | React Native |
 | --- | --- |
-| `div`, `span`, `p` | `View`, `Text`, `ScrollView` |
-| CSS فایل جدا | `StyleSheet.create` (شیء جاوااسکریپت) |
+| `div`, `span`, `p` | `View`, `Text` |
+| CSS جدا | `StyleSheet.create` (شیء JS) |
 | `onClick` | `onPress` |
-| `px` واحد | واحد بدون بعد (نقطه، تراکم‌محور) |
-| `:hover` | ندارد (از `Pressable` و state استفاده کنید) |
+| `:hover` | ندارد |
 | Flexbox پیش‌فرض `row` | پیش‌فرض `column` |
+| `px` | واحد بدون بعد و تراکم‌محور |
 
-همه‌ی متن‌ها **باید** داخل `<Text>` باشند:
+**همه‌ی متن‌ها باید داخل `<Text>` باشند.** متن لخت بیرون از Text خطا می‌دهد:
 
 ```tsx
 <View>
-  <Text>سلام</Text>   {/* ✅ */}
+  <Text>سلام</Text>
 </View>
 ```
 
-## ۳. StyleSheet و چیدمان
+## ۳. استایل و چیدمان
 
 ```tsx
 import { StyleSheet, View, Text } from 'react-native'
 
-export function Card({ title, subtitle }: { title: string; subtitle: string }) {
+export function HabitRow({ title, streak }: { title: string; streak: number }) {
   return (
-    <View style={styles.card}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{subtitle}</Text>
+    <View style={styles.row}>
+      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      <Text style={styles.streak}>🔥 {streak}</Text>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  card: {
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     padding: 16,
     borderRadius: 12,
     backgroundColor: '#111827',
-    gap: 4,
     shadowColor: '#000',
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.15,
     shadowRadius: 8,
-    elevation: 3            // Android
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3
   },
-  title: { color: '#f9fafb', fontSize: 16, fontWeight: '600' },
-  subtitle: { color: '#9ca3af', fontSize: 13 }
+  title: { color: '#f9fafb', fontSize: 16, fontWeight: '600', flexShrink: 1 },
+  streak: { color: '#fbbf24', fontSize: 13 }
 })
 ```
 
-آرایه‌ی استایل برای شرطی‌سازی:
+- `flex: 1` یعنی پر کردن فضای باقی‌مانده.
+- `gap` در نسخه‌های جدید پشتیبانی می‌شود؛ از آن به‌جای marginهای دستی استفاده کنید.
+- برای متن بلند `numberOfLines` و `flexShrink: 1` لازم است.
+- استایل شرطی: `style={[styles.row, done && styles.done]}`.
+- `useWindowDimensions()` برای واکنش به چرخش صفحه.
+
+## ۴. لیست‌ها: FlatList، نه ScrollView + map
 
 ```tsx
-<View style={[styles.card, isDone && styles.cardDone, { marginTop: 8 }]} />
-```
-
-## ۴. لیست‌ها: FlatList
-
-برای هر لیست پویا از `FlatList` (یا `FlashList`) استفاده کنید، نه `ScrollView` + `map`.
-
-```tsx
-import { FlatList } from 'react-native'
+import { FlatList, Text, View } from 'react-native'
 
 <FlatList
   data={habits}
   keyExtractor={(item) => item.id}
-  renderItem={({ item }) => <HabitRow habit={item} />}
+  renderItem={({ item }) => <HabitRow title={item.title} streak={item.streak} />}
   ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-  ListEmptyComponent={<Text>هنوز عادتی ثبت نشده است.</Text>}
-  contentContainerStyle={{ padding: 16 }}
+  ListEmptyComponent={<Text style={{ color: '#9ca3af' }}>هنوز عادتی ثبت نشده است.</Text>}
+  contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
+  refreshing={refreshing}
+  onRefresh={onRefresh}
 />
 ```
 
-ویژگی‌های مهم: `keyExtractor`، `ListEmptyComponent`، `onRefresh/refreshing`، `onEndReached` برای صفحه‌بندی.
+`ScrollView` همه‌ی فرزندان را یک‌جا mount می‌کند؛ برای لیست‌های بلند از FlatList/FlashList استفاده کنید که virtualization دارد. برای لیست‌های خیلی بزرگ، `FlashList` (از Shopify) کارایی بهتری می‌دهد.
 
-## ۵. Pressable و بازخورد لمس
+## ۵. تعامل و دسترس‌پذیری
 
 ```tsx
 import { Pressable, Text } from 'react-native'
 
 <Pressable
-  onPress={() => toggle(id)}
+  onPress={() => toggle(item.id)}
+  onLongPress={() => remove(item.id)}
   accessibilityRole="button"
-  accessibilityLabel="علامت‌زدن انجام عادت"
+  accessibilityLabel={`علامت‌زدن ${item.title}`}
+  accessibilityState={{ checked: item.done }}
   hitSlop={8}
-  style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}
+  style={({ pressed }) => [styles.check, pressed && { opacity: 0.5 }]}
 >
-  <Text>{item.title}</Text>
+  <Text>{item.done ? '✓' : '○'}</Text>
 </Pressable>
 ```
 
-حداقل اندازه‌ی هدف لمس **44×44** نقطه است.
+- هدف لمس حداقل **۴۴×۴۴** نقطه.
+- `hitSlop` ناحیه‌ی لمس را بدون تغییر ظاهر بزرگ می‌کند.
+- برای فهرست بازشو، `accessibilityState` را درست تنظیم کنید.
 
-## ۶. TextInput و کیبورد
+## ۶. فرم و کیبورد
 
 ```tsx
-import { TextInput, KeyboardAvoidingView, Platform } from 'react-native'
+import { useState } from 'react'
+import { KeyboardAvoidingView, Platform, TextInput, Pressable, Text, View } from 'react-native'
 
-<KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-  <TextInput
-    value={draft}
-    onChangeText={setDraft}
-    placeholder="عادت جدید…"
-    placeholderTextColor="#6b7280"
-    returnKeyType="done"
-    onSubmitEditing={add}
-    autoCapitalize="none"
-  />
-</KeyboardAvoidingView>
+export function HabitForm({ onAdd }: { onAdd: (title: string) => void }) {
+  const [title, setTitle] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  function submit() {
+    const value = title.trim()
+    if (value.length < 2) return setError('نام عادت خیلی کوتاه است.')
+    onAdd(value)
+    setTitle('')
+    setError(null)
+  }
+
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={{ gap: 8 }}>
+        <TextInput
+          value={title}
+          onChangeText={setTitle}
+          placeholder="عادت جدید…"
+          placeholderTextColor="#6b7280"
+          returnKeyType="done"
+          onSubmitEditing={submit}
+          style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderRadius: 10, padding: 12 }}
+        />
+        {error && <Text style={{ color: '#f87171' }}>{error}</Text>}
+        <Pressable onPress={submit} style={{ backgroundColor: '#6366f1', padding: 12, borderRadius: 10 }}>
+          <Text style={{ color: '#fff', textAlign: 'center', fontWeight: '600' }}>افزودن</Text>
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
+  )
+}
 ```
 
 ## ۷. ذخیره‌سازی محلی
@@ -145,28 +180,32 @@ npx expo install @react-native-async-storage/async-storage
 ```ts
 import AsyncStorage from '@react-native-async-storage/async-storage'
 
+const KEY = 'habits-v1'
+
 export async function loadHabits(): Promise<Habit[]> {
   try {
-    const raw = await AsyncStorage.getItem('habits')
-    return raw ? (JSON.parse(raw) as Habit[]) : []
-  } catch (e) {
-    console.warn('خواندن ناموفق', e)
+    const raw = await AsyncStorage.getItem(KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? (parsed as Habit[]) : []
+  } catch (err) {
+    console.warn('خواندن ناموفق', err)
     return []
   }
 }
 
 export async function saveHabits(habits: Habit[]): Promise<void> {
   try {
-    await AsyncStorage.setItem('habits', JSON.stringify(habits))
-  } catch (e) {
-    console.warn('ذخیره ناموفق', e)
+    await AsyncStorage.setItem(KEY, JSON.stringify(habits))
+  } catch (err) {
+    console.warn('ذخیره ناموفق', err)
   }
 }
 ```
 
-> برای داده‌ی حساس (توکن) از AsyncStorage استفاده نکنید؛ `expo-secure-store` را ببینید.
+برای توکن و داده‌ی حساس از AsyncStorage استفاده نکنید؛ `expo-secure-store` (درس APIهای بومی).
 
-## ۸. SafeArea و امنیت ظاهری
+## ۸. Safe Area و نوار وضعیت
 
 ```bash
 npx expo install react-native-safe-area-context
@@ -174,11 +213,13 @@ npx expo install react-native-safe-area-context
 
 ```tsx
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
+import { StatusBar } from 'expo-status-bar'
 
 export default function App() {
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom']}>
+      <StatusBar style="light" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#0b0f17' }} edges={['top', 'bottom']}>
         {/* محتوا */}
       </SafeAreaView>
     </SafeAreaProvider>
@@ -186,42 +227,121 @@ export default function App() {
 }
 ```
 
-بدون این، محتوا زیر notch یا نوار خانه‌ی آیفون می‌رود.
+بدون Safe Area، محتوا زیر notch یا نوار خانه‌ی آیفون می‌رود.
 
-## ۹. پیکربندی `app.json`
+## ۹. app.json و تفاوت پلتفرم‌ها
 
 ```json
 {
   "expo": {
-    "name": "Habit Tracker",
+    "name": "ردیاب عادت",
     "slug": "habit-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "habittracker",
+    "scheme": "habits",
     "userInterfaceStyle": "automatic",
     "ios": { "supportsTablet": true, "bundleIdentifier": "com.acme.habits" },
-    "android": { "package": "com.acme.habits", "adaptiveIcon": { "backgroundColor": "#0b0f17" } }
+    "android": { "package": "com.acme.habits", "edgeToEdgeEnabled": true }
   }
 }
 ```
 
-## ۱۰. اشکال‌زدایی
+```tsx
+import { Platform } from 'react-native'
+const top = Platform.select({ ios: 12, android: 8, default: 0 })
+```
 
-- `npx expo doctor` برای بررسی ناسازگاری نسخه‌ها.
-- همیشه با `npx expo install pkg` نصب کنید تا نسخه‌ی سازگار با SDK انتخاب شود.
-- Logها در ترمینال `npx expo start` و در Expo Go دیده می‌شوند.
-- برای گوشی واقعی و شبکه‌ی محدود: `npx expo start --tunnel`.
+## ۱۰. ساخت گام‌به‌گام ردیاب عادت (تمرین)
 
-## چک‌لیست کیفیت اپ
+**گام ۱ — مدل داده**
 
-- [ ] همه‌ی متن‌ها در `Text`
-- [ ] لیست‌های پویا با `FlatList` و `keyExtractor`
-- [ ] SafeArea رعایت شده
-- [ ] هدف لمس ≥ 44pt
-- [ ] `accessibilityLabel` روی عناصر تعاملی
-- [ ] خطاهای AsyncStorage مدیریت شده
-- [ ] تست روی هر دو پلتفرم
+```ts
+export interface Habit {
+  id: string
+  title: string
+  streak: number
+  lastDone: string | null   // YYYY-MM-DD
+}
+```
 
-## تمرین این درس
+**گام ۲ — لایه‌ی ذخیره‌سازی** (`storage.ts` با load/save و مدیریت خطا).
 
-اپ ردیاب عادت با Expo + TypeScript: FlatList، فرم افزودن با اعتبارسنجی، ذخیره با AsyncStorage، StyleSheet و SafeArea. جزئیات در تب تمرین است.
+**گام ۳ — state اصلی:** `habits`، `loading`؛ در `useEffect` اولیه بارگذاری و در تغییرات ذخیره.
+
+**گام ۴ — FlatList** با `keyExtractor`، `ListEmptyComponent` و separator.
+
+**گام ۵ — افزودن** با فرم و اعتبارسنجی؛ برای id از `expo-crypto` استفاده کنید:
+
+```bash
+npx expo install expo-crypto
+```
+
+```ts
+import * as Crypto from 'expo-crypto'
+const id = Crypto.randomUUID()
+```
+
+**گام ۶ — انجام روزانه:** اگر `lastDone` امروز نیست، streak را +۱ و `lastDone` را امروز کن.
+
+**گام ۷ — حذف** با `onLongPress` و تأیید (`Alert.alert`).
+
+**گام ۸ — SafeArea و KeyboardAvoidingView** و تست در هر دو پلتفرم.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `expo-ts` | بخش ۱ و ۹ |
+| `flatlist` | بخش ۴ |
+| `styles` | بخش ۳ |
+| `storage` | بخش ۷ |
+| `safe-area` | بخش ۵ و ۸ |
+
+## ۱۱. عیب‌یابی
+
+| مشکل | علت | راه‌حل |
+| --- | --- | --- |
+| متن بیرون Text | متن خام | `<Text>` |
+| لیست کند/کرش | `ScrollView + map` | FlatList |
+| کیبورد روی فرم می‌افتد | بدون KeyboardAvoidingView | بخش ۶ |
+| تصویر کوچک/کشیده | بدون width/height یا resizeMode | استایل صریح |
+| خطای نسخه‌ی کتابخانه | نصب با npm | `npx expo install` |
+| `Unable to resolve module` | کش | `npx expo start -c` |
+| SafeArea بی‌اثر | بدون Provider | SafeAreaProvider |
+
+## ۱۲. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا `flexDirection` پیش‌فرض برای شما عجیب است؟
+
+**پاسخ:** در React Native پیش‌فرض `column` است (وب `row`)؛ برای ردیف باید صریح `row` بدهید.
+
+**۲.** چرا `FlatList` بهتر از map داخل ScrollView است؟
+
+**پاسخ:** virtualization: فقط آیتم‌های نزدیک viewport mount می‌شوند.
+
+**۳.** چطور مطمئن شوید داده بعد از بستن اپ می‌ماند؟
+
+**پاسخ:** ذخیره در AsyncStorage بعد از هر تغییر + بارگذاری اولیه با متغیر loading.
+
+**۴.** چرا `expo install` بهتر از `npm install` است؟
+
+**پاسخ:** نسخه‌ی سازگار با SDK پروژه را انتخاب می‌کند.
+
+## ۱۳. خودآزمایی
+
+1. تفاوت View و Text با div و span؟
+2. FlatList چه propsهایی برای لیست خالی و جداکننده دارد؟
+3. SafeArea چه مشکلی را حل می‌کند؟
+4. Flexbox در موبایل چه تفاوتی با وب دارد؟
+5. AsyncStorage برای چه داده‌ای مناسب نیست؟
+6. KeyboardAvoidingView را کجا می‌گذارید؟
+
+## ۱۴. چک‌لیست تحویل
+
+- [ ] پروژه Expo با TypeScript و app.json
+- [ ] FlatList با keyExtractor و empty state
+- [ ] استایل با StyleSheet و gap
+- [ ] ذخیره/بازیابی با مدیریت خطا
+- [ ] SafeArea و KeyboardAvoidingView
+- [ ] هدف لمس ≥44 و accessibilityLabel
+- [ ] تست روی Android و iOS (یا شبیه‌ساز)

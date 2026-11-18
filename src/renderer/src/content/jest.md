@@ -1,227 +1,326 @@
-# تست واحد با Jest
+# تست واحد با Jest (و Vitest)
 
-> مراجع: [Jest Docs](https://jestjs.io/docs/getting-started) · [Testing Library](https://testing-library.com/docs/react-testing-library/intro/)
+> مراجع: [Jest Docs](https://jestjs.io/docs/getting-started) · [Vitest Docs](https://vitest.dev/) · [Testing Library](https://testing-library.com/docs/) · [MSW](https://mswjs.io/)
 
-تست واحد سریع، ایزوله و قابل تکرار است. هدفش این نیست که «پوشش ۱۰۰٪» بسازیم؛ هدف این است که تغییرات آینده نترسناک شوند.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. راه‌اندازی
+تست‌هایی می‌نویسید که رفتار را تضمین می‌کنند نه پیاده‌سازی را: ساختار تست، matcherها، کد غیرهمگام، mock و fake timer، تست کامپوننت با Testing Library و اندازه‌گیری پوشش. در پایان، منطق سبد خرید و یک کامپوننت فرم را با تست‌های پایدار پوشش می‌دهید.
+
+---
+
+## ۱. هرم تست و هدف
+
+```
+        /\        E2E (کم، کند، اطمینان بالا)
+       /  \       Integration (متوسط)
+      /____\      Unit (زیاد، سریع، ارزان)
+```
+
+- **Unit**: تابع خالص، reducer، validator.
+- **Integration**: کامپوننت + چند ماژول، API + DB.
+- **E2E**: مسیر کاربر در مرورگر واقعی (درس Playwright).
+
+تست خوب: سریع، مستقل، تکرارپذیر، روی رفتار قابل مشاهده. تستی که با تغییر نام متغیر داخلی می‌شکند، تست خوبی نیست.
+
+## ۲. راه‌اندازی
 
 ```bash
+# Jest + TypeScript
 npm i -D jest ts-jest @types/jest
-# یا با Vitest (سازگار با APی Jest و سریع‌تر در Vite)
-npm i -D vitest
+npx jest --init
+
+# یا Vitest (سریع‌تر، سازگار با Vite)
+npm i -D vitest @vitest/coverage-v8
+```
+
+```ts
+// vitest.config.ts
+import { defineConfig } from 'vitest/config'
+
+export default defineConfig({
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+    coverage: { provider: 'v8', reporter: ['text', 'html'], thresholds: { lines: 80 } }
+  }
+})
 ```
 
 ```json
-// jest.config.ts
-import type { Config } from 'jest'
-
-const config: Config = {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
-  roots: ['<rootDir>/src'],
-  testMatch: ['**/*.test.ts'],
-  collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/server.ts'],
-  coverageThreshold: {
-    global: { branches: 75, functions: 80, lines: 80, statements: 80 }
+{
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage"
   }
 }
-
-export default config
 ```
 
-```bash
-npx jest --watch          # حالت تعاملی
-npx jest --coverage       # گزارش پوشش
-```
+API تقریباً یکسان است؛ تفاوت‌های اصلی: `vi` به‌جای `jest`، و Vitest نیاز به transform جدا ندارد.
 
-## ۲. ساختار AAA
+## ۳. ساختار تست
 
 ```ts
-import { calculateInvoice } from '../invoice'
+import { describe, it, expect, beforeEach } from 'vitest'
+import { calculateTotal, applyCoupon } from '../src/cart'
 
-describe('calculateInvoice', () => {
-  it('جمع اقلام را با مالیات ۹٪ محاسبه می‌کند', () => {
-    // Arrange
-    const items = [{ price: 100_000, qty: 2 }, { price: 50_000, qty: 1 }]
+describe('calculateTotal', () => {
+  it('جمع قیمت × تعداد را برمی‌گرداند', () => {
+    const items = [
+      { price: 100_000, qty: 2 },
+      { price: 50_000, qty: 1 }
+    ]
+    expect(calculateTotal(items)).toBe(250_000)
+  })
 
-    // Act
-    const total = calculateInvoice(items)
-
-    // Assert
-    expect(total).toBe(254_250)
+  it('برای سبد خالی صفر برمی‌گرداند', () => {
+    expect(calculateTotal([])).toBe(0)
   })
 })
 ```
 
-نام تست باید رفتار را توصیف کند: `it('برای سبد خالی صفر برمی‌گرداند')` نه `it('تست ۱')`.
+```ts
+// جدول‌محور: موارد مرزی را یکجا پوشش می‌دهد
+it.each([
+  { items: [], expected: 0 },
+  { items: [{ price: 10, qty: 2 }], expected: 20 },
+  { items: [{ price: 0, qty: 5 }], expected: 0 }
+])('calculateTotal($items) = $expected', ({ items, expected }) => {
+  expect(calculateTotal(items)).toBe(expected)
+})
+```
 
-## ۳. matcherهای پرکاربرد
+## ۴. Matcherهای پرکاربرد
 
 ```ts
-expect(value).toBe(3)                        // برابری دقیق (Object.is)
-expect(obj).toEqual({ a: 1 })                // ساختاری
-expect(arr).toHaveLength(3)
+expect(value).toBe(3)                 // برابری دقیق (Object.is)
+expect(obj).toEqual({ a: 1 })         // برابری ساختاری
+expect(obj).toStrictEqual({ a: 1 })   // + نوع/undefined
 expect(arr).toContain('x')
-expect(fn).toThrow('پیام')
-expect(fn).toThrow(/الگو/)
-expect(value).toBeGreaterThan(0)
-expect(value).toBeCloseTo(0.30000000000000004, 5)
-expect(value).toBeNull()
-expect(value).toBeTruthy()
+expect(arr).toHaveLength(2)
+expect(fn).toThrow(/نامعتبر/)
+expect(value).toBeCloseTo(0.3, 5)
+expect(mock).toHaveBeenCalledWith('id-1')
+expect(fn).not.toHaveBeenCalled()
 ```
 
-تفاوت `toBe` و `toEqual` را جدی بگیرید: برای آبجکت/آرایه `toEqual` (یا `toStrictEqual`) استفاده کنید.
+`toBe` برای آبجکت‌ها **اشتباه** است (مرجع مقایسه می‌شود). اعداد اعشاری را با `toBeCloseTo` تست کنید.
 
-## ۴. تست جدول‌محور
+## ۵. کد غیرهمگام
 
 ```ts
-describe('applyDiscount', () => {
-  it.each([
-    { total: 1000, discount: 10, expected: 900 },
-    { total: 1000, discount: 0, expected: 1000 },
-    { total: 500, discount: 100, expected: 0 },
-    { total: 0, discount: 50, expected: 0 }
-  ])('برای $total با $discount٪ تخفیف → $expected', ({ total, discount, expected }) => {
-    expect(applyDiscount(total, discount)).toBe(expected)
-  })
+it('پست را برمی‌گرداند', async () => {
+  const post = await getPost('slug')
+  expect(post.title).toBe('سلام')
+})
+
+it('برای ۴۰۴ خطا می‌دهد', async () => {
+  await expect(getPost('missing')).rejects.toThrow('HTTP 404')
+})
+
+it('با fake timer تایمر را کنترل می‌کند', () => {
+  vi.useFakeTimers()
+  const spy = vi.fn()
+  setTimeout(spy, 3000)
+  vi.advanceTimersByTime(3000)
+  expect(spy).toHaveBeenCalledTimes(1)
+  vi.useRealTimers()
 })
 ```
 
-این الگو موارد مرزی (۰، منفی، سقف) را ارزان پوشش می‌دهد.
+از `done` callback پرهیز کنید؛ `async/await` خواناتر و کم‌خطاتر است.
 
-## ۵. Mock کردن وابستگی‌ها
-
-کد باید تست‌پذیر نوشته شود: وابستگی خارجی را **تزریق** کنید.
+## ۶. Mock: چه چیزی را جدا کنیم؟
 
 ```ts
-// payment.ts
-export interface Gateway {
-  charge(amount: number, token: string): Promise<{ id: string; status: 'ok' | 'failed' }>
-}
-
-export async function pay(order: { total: number }, token: string, gateway: Gateway) {
-  if (order.total <= 0) throw new Error('مبلغ نامعتبر')
-  const result = await gateway.charge(order.total, token)
-  if (result.status !== 'ok') throw new Error('پرداخت ناموفق')
-  return { paymentId: result.id }
-}
-```
-
-```ts
-// payment.test.ts
-const okGateway: Gateway = {
-  charge: jest.fn().mockResolvedValue({ id: 'p_1', status: 'ok' })
-}
-
-it('شناسه پرداخت را برمی‌گرداند', async () => {
-  const res = await pay({ total: 100_000 }, 'tok', okGateway)
-  expect(res).toEqual({ paymentId: 'p_1' })
-  expect(okGateway.charge).toHaveBeenCalledWith(100_000, 'tok')
-})
-
-it('برای مبلغ صفر خطا می‌دهد و درگاه را صدا نمی‌زند', async () => {
-  await expect(pay({ total: 0 }, 'tok', okGateway)).rejects.toThrow('مبلغ نامعتبر')
-  expect(okGateway.charge).not.toHaveBeenCalled()
-})
-```
-
-```ts
-// ماژول‌محور
-jest.mock('../lib/gateway', () => ({
-  charge: jest.fn().mockResolvedValue({ id: 'p_1', status: 'ok' })
+// ماژول
+vi.mock('../src/lib/mailer', () => ({
+  sendMail: vi.fn().mockResolvedValue({ id: 'm1' })
 }))
-```
 
-## ۶. تست کد ناهمگام
+import { sendMail } from '../src/lib/mailer'
+import { register } from '../src/services/auth'
+
+it('بعد از ثبت‌نام ایمیل می‌فرستد', async () => {
+  await register({ email: 'a@b.com', password: 'secret123' })
+  expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'a@b.com' }))
+})
+```
 
 ```ts
-it('در خطای شبکه reject می‌شود', async () => {
-  const gw: Gateway = { charge: jest.fn().mockRejectedValue(new Error('timeout')) }
-  await expect(pay({ total: 10 }, 't', gw)).rejects.toThrow('timeout')
-})
-
-it('با تایمر جعلی، timeout را بررسی می‌کند', () => {
-  jest.useFakeTimers()
-  const onTimeout = jest.fn()
-  scheduleTimeout(onTimeout, 5000)
-  jest.advanceTimersByTime(5000)
-  expect(onTimeout).toHaveBeenCalledTimes(1)
-  jest.useRealTimers()
-})
+// spy روی متد
+const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+// ...
+expect(spy).toHaveBeenCalled()
+spy.mockRestore()
 ```
 
-## ۷. beforeEach و پاک‌سازی
+| نوع | کاربرد |
+| --- | --- |
+| Stub | مقدار ثابت برمی‌گرداند |
+| Spy | رفتار اصلی + ثبت فراخوانی |
+| Mock | رفتار کامل جعلی |
+| Fake | پیاده‌سازی سبک (مثلاً DB در حافظه) |
 
-```ts
-let db: InMemoryStore
+**قاعده:** فقط مرزهای بیرونی (شبکه، زمان، تصادفی، فایل، ایمیل) را mock کنید؛ منطق داخلی را نه.
 
-beforeEach(() => {
-  db = new InMemoryStore()
-  jest.clearAllMocks()      // شمارنده‌ی فراخوانی mockها را صفر می‌کند
-})
-```
+> در Jest همین کد با `jest.mock`، `jest.fn()` و `jest.spyOn` نوشته می‌شود؛ نام‌ها یک‌به‌یک معادل‌اند. `jest.mock` هم hoist می‌شود، پس متغیرهای بیرونی را با نام `mock...` تعریف کنید یا `jest.hoisted` را به کار ببرید.
 
-اگر تست‌ها به هم وابسته باشند، شکست یکی باعث آبشار می‌شود. هر تست باید از صفر شروع کند.
-
-## ۸. تست کامپوننت React
+## ۷. تست کامپوننت با Testing Library
 
 ```tsx
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { TaskForm } from './TaskForm'
+import { expect, it, vi } from 'vitest'
+import { LoginForm } from '../src/LoginForm'
 
-it('وظیفه خالی را اضافه نمی‌کند', async () => {
-  const onSubmit = jest.fn()
-  render(<TaskForm onSubmit={onSubmit} />)
+it('با ایمیل نامعتبر خطا نشان می‌دهد', async () => {
+  const onSubmit = vi.fn()
+  render(<LoginForm onSubmit={onSubmit} />)
 
-  await userEvent.click(screen.getByRole('button', { name: 'افزودن' }))
+  await userEvent.type(screen.getByLabelText('ایمیل'), 'not-an-email')
+  await userEvent.click(screen.getByRole('button', { name: 'ورود' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('ایمیل معتبر نیست')
   expect(onSubmit).not.toHaveBeenCalled()
 })
 
-it('عنوان را trim کرده و ارسال می‌کند', async () => {
-  const onSubmit = jest.fn()
-  render(<TaskForm onSubmit={onSubmit} />)
+it('با ورودی معتبر ارسال می‌کند', async () => {
+  const onSubmit = vi.fn()
+  render(<LoginForm onSubmit={onSubmit} />)
 
-  await userEvent.type(screen.getByLabelText('عنوان'), '  خرید نان  ')
-  await userEvent.click(screen.getByRole('button', { name: 'افزودن' }))
+  await userEvent.type(screen.getByLabelText('ایمیل'), 'a@b.com')
+  await userEvent.type(screen.getByLabelText('رمز'), 'secret123')
+  await userEvent.click(screen.getByRole('button', { name: 'ورود' }))
 
-  expect(onSubmit).toHaveBeenCalledWith('خرید نان')
+  expect(onSubmit).toHaveBeenCalledWith({ email: 'a@b.com', password: 'secret123' })
 })
 ```
 
-قواعد:
+**اولویت queryها:** `getByRole` > `getByLabelText` > `getByText` > `getByTestId` (آخرین راه).
 
-- با نقش و نام (role/label) کوئری کنید، نه `className`.
-- رفتار کاربر را تست کنید، نه جزئیات پیاده‌سازی (state داخلی).
-- روی `await` برای `userEvent` دقت کنید.
+- `getBy` فوری است، `findBy` غیرهمگام (منتظر می‌ماند)، `queryBy` برای «نباید باشد».
+- `userEvent` بهتر از `fireEvent` است (رفتار واقعی مرورگر).
 
-## ۹. TDD در عمل
+## ۸. شبکه با MSW
 
-چرخه‌ی Red → Green → Refactor:
+```ts
+import { http, HttpResponse } from 'msw'
+import { setupServer } from 'msw/node'
 
-1. یک تست کوچک بنویسید که شکست بخورد.
-2. کمترین کد برای پاس شدن بنویسید.
-3. بازنویسی کنید، تست‌ها همچنان پاس.
+const server = setupServer(
+  http.get('/api/tasks', () =>
+    HttpResponse.json({ data: [{ id: '1', title: 'تست' }] })
+  )
+)
 
-TDD برای منطق دامنه (محاسبات، اعتبارسنجی، reducerها) عالی است؛ برای UI اکتشافی کمتر.
+beforeAll(() => server.listen())
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
 
-## ۱۰. آنچه نباید تست کنید
-
-- کتابخانه‌های خارجی (خودشان تست دارند).
-- جزئیات پیاده‌سازی (نام تابع خصوصی، تعداد رندر).
-- تست شکننده‌ای که با تغییر یک متن ساده می‌شکند ولی رفتار عوض نشده.
-
-## ۱۱. اشکال‌زدایی تست
-
-```bash
-npx jest -t "نام تست"      # فقط یک تست
-npx jest --detectOpenHandles
-npx jest --runInBand
+it('لیست را نمایش می‌دهد', async () => {
+  render(<TaskList />)
+  expect(await screen.findByText('تست')).toBeInTheDocument()
+})
 ```
 
-خطای رایج: `Jest did not exit one second after...` → یک تایمر/اتصال باز مانده است.
+MSW در سطح شبکه مداخله می‌کند، نه با mock کردن `fetch`؛ تست به کد واقعی نزدیک‌تر است.
 
-## تمرین این درس
+## ۹. پوشش: عدد گمراه‌کننده
 
-ماژول فاکتور و پرداخت: تست‌های table-driven برای فاکتور، mock کردن درگاه با سناریوهای موفق/ناموفق/timeout، و آستانه‌ی پوشش در پیکربندی. جزئیات در تب تمرین است.
+```bash
+npm run test:cov
+```
+
+- `lines/branches/functions/statements` را ببینید ولی **هدف نباشید**.
+- ۱۰۰٪ پوشش با assertion ضعیف بی‌فایده است.
+- مسیرهای خطا و مرزها (خالی، صفر، منفی، طولانی) را پوشش دهید.
+- کد تولیدشده/type-only را از coverage خارج کنید.
+
+## ۱۰. تست پایدار (flaky-proof)
+
+- هر تست state خودش را می‌سازد؛ بدون وابستگی به ترتیب.
+- زمان و تصادفی را تزریق کنید (`clock`، `idGen`).
+- از `sleep` واقعی پرهیز کنید؛ `findBy`/fake timer.
+- پاک‌سازی: `afterEach` برای timer، server، DOM.
+- تست را با اجرای تنها همان فایل دیباگ کنید: `vitest run path -t "name"`.
+- در CI با `--runInBand` یا worker محدود اگر منابع کم است.
+
+## ۱۱. ساخت گام‌به‌گام تست سبد خرید (تمرین)
+
+**گام ۱ — کد قابل تست:** توابع خالص `calculateTotal`، `applyCoupon`، `reducer` را از UI جدا کنید.
+
+**گام ۲ — تست واحد:** جمع، تخفیف درصدی، سقف تخفیف، کد نامعتبر، سبد خالی.
+
+**گام ۳ — reducer:** add/remove/setQty با `it.each` (در Jest: `test.each`).
+
+**گام ۴ — کامپوننت:** `CartSummary` تعداد و جمع را نشان دهد؛ با RTL و `getByRole`.
+
+**گام ۵ — فرم:** `CouponForm` با اعتبارسنجی، خطا با `role="alert"`، فراخوانی callback.
+
+**گام ۶ — شبکه:** MSW برای `GET /api/products` و حالت خطا.
+
+**گام ۷ — پوشش:** آستانه‌ی ۸۰٪؛ بررسی branchهای پوشش‌نداده.
+
+**گام ۸ — CI:** `npm test -- --coverage` در workflow.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `structure` | بخش ۳ (describe/it با نام توصیفی) |
+| `table` | بخش ۳ (`it.each` / `test.each`) |
+| `mocks` | بخش ۶ (`jest.mock`/`jest.fn`، معادل `vi`) |
+| `async` | بخش ۵ |
+| `coverage` | بخش ۲ و ۹ (thresholds) |
+
+## ۱۲. عیب‌یابی
+
+| خطا | علت | راه‌حل |
+| --- | --- | --- |
+| `Cannot find module` | alias/config | `moduleNameMapper` یا `resolve.alias` |
+| `toBe` روی آبجکت شکست می‌خورد | مقایسه‌ی مرجع | `toEqual` |
+| تست غیرهمگام تمام می‌شود | بدون await | `async` + `await` |
+| `act(...)` warning | به‌روزرسانی state خارج act | `await userEvent`/`findBy` |
+| تست فقط در CI می‌شکند | منطقه‌زمانی/ترتیب | TZ ثابت، ایزولاسیون |
+| mock برنمی‌گردد | hoisting | `vi.hoisted` یا import بعد از mock |
+| timer واقعی کند است | sleep | fake timers |
+
+## ۱۳. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا `toBe` برای `{a:1}` نامناسب است؟
+
+**پاسخ:** مرجع دو آبجکت متفاوت است؛ `toEqual` ساختار را مقایسه می‌کند.
+
+**۲.** چه چیزی را mock نکنیم؟
+
+**پاسخ:** منطق داخلی و توابع خالص؛ فقط مرزهای بیرونی.
+
+**۳.** تفاوت `getBy` و `findBy`؟
+
+**پاسخ:** `findBy` برمی‌گردد Promise و تا ظاهر شدن/تایم‌اوت صبر می‌کند.
+
+**۴.** چرا پوشش ۱۰۰٪ تضمین کیفیت نیست؟
+
+**پاسخ:** خط اجرا شده ممکن است بدون assertion معنادار باشد؛ رفتار و مرزها مهم‌اند.
+
+## ۱۴. خودآزمایی
+
+1. هرم تست چیست؟
+2. چهار matcher پرکاربرد؟
+3. تست async را چطور می‌نویسید؟
+4. mock، stub و spy چه تفاوتی دارند؟
+5. چرا `getByRole` اولویت دارد؟
+6. تست flaky را چطور رفع می‌کنید؟
+
+## ۱۵. چک‌لیست تحویل
+
+- [ ] تست واحد برای منطق خالص
+- [ ] `it.each` برای موارد مرزی
+- [ ] تست خطا با `rejects`/`alert`
+- [ ] mock فقط برای مرزها
+- [ ] تست کامپوننت با RTL
+- [ ] MSW برای شبکه
+- [ ] بدون warning `act`
+- [ ] coverage ≥ آستانه
+- [ ] اجرای تست در CI

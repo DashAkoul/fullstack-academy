@@ -1,34 +1,37 @@
 # تست End-to-End با Playwright
 
-> مرجع رسمی: [playwright.dev](https://playwright.dev/docs/intro)
+> مراجع: [Playwright Docs](https://playwright.dev/docs/intro) · [Best Practices](https://playwright.dev/docs/best-practices) · [Trace Viewer](https://playwright.dev/docs/trace-viewer)
 
-تست واحد می‌گوید «قطعات درست کار می‌کنند». تست E2E می‌گوید «کاربر می‌تواند کارش را انجام دهد». Playwright این کار را با پایداری و ابزار دیباگ عالی انجام می‌دهد.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. نصب
+تست‌هایی می‌نویسید که مثل کاربر واقعی در مرورگر کار می‌کنند و پایدار می‌مانند: locator مقاوم، انتظار خودکار، احراز هویت یک‌بار، mock شبکه، اشکال‌زدایی با Trace و اجرا در CI. در پایان، مسیر خرید یک فروشگاه را end-to-end تست می‌کنید.
+
+---
+
+## ۱. E2E کجا ارزش دارد؟
+
+E2E برای **مسیرهای حیاتی کسب‌وکار** است: ثبت‌نام، ورود، پرداخت، ساخت سفارش، انتشار محتوا.
+
+- کند و شکننده است → تعداد کم، انتخاب دقیق.
+- چیزهایی که unit/integration پوشش می‌دهند را تکرار نکنید.
+- E2E واقعی: مرورگر + سرور + دیتابیس (یا محیط staging).
 
 ```bash
 npm init playwright@latest
-# TypeScript ✓  tests/ ✓  GitHub Actions ✓
 npx playwright install --with-deps
-```
-
-```
-playwright.config.ts
-tests/
-├─ example.spec.ts
-└─ e2e/
-   └─ todo.spec.ts
+npx playwright test
+npx playwright test --ui
+npx playwright show-report
 ```
 
 ## ۲. پیکربندی
 
 ```ts
+// playwright.config.ts
 import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
-  testDir: './tests',
-  timeout: 30_000,
-  expect: { timeout: 5_000 },
+  testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -43,170 +46,147 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'] } },
     { name: 'mobile', use: { ...devices['Pixel 7'] } }
   ],
   webServer: {
-    command: 'npm run dev',
+    command: 'npm run preview',
     url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000
   }
 })
 ```
 
-## ۳. اولین تست
+`webServer` اپ را قبل از تست بالا می‌آورد و بعد می‌بندد.
+
+## ۳. Locator: مقاوم در برابر تغییر UI
 
 ```ts
+// ✅ نقش و نام قابل مشاهده (مثل کاربر و screen reader)
+page.getByRole('button', { name: 'افزودن به سبد' })
+page.getByRole('heading', { name: 'سبد خرید' })
+page.getByLabel('ایمیل')
+page.getByPlaceholder('جستجو…')
+page.getByText('سفارش ثبت شد')
+
+// ⚠️ آخرین راه
+page.getByTestId('checkout-total')
+```
+
+**هرگز** از CSS/XPath شکننده مثل `div > div:nth-child(3) span` استفاده نکنید (مگر ناچار با توضیح).
+
+```ts
+const row = page.getByRole('row', { name: /پیتزا/ })
+await row.getByRole('button', { name: 'حذف' }).click()
+```
+
+Playwright در حالت strict است: اگر locator چند عنصر پیدا کند، خطا می‌دهد؛ همین باعث می‌شود تست مبهم نباشد. برای چند عنصر: `.first()`, `.nth(0)`, `.filter({ hasText })`.
+
+## ۴. انتظار خودکار (بدون sleep)
+
+```ts
+// ✅ web-first assertion: تا شرط برقرار نشود صبر می‌کند
+await expect(page.getByRole('heading', { name: 'سبد خرید' })).toBeVisible()
+await expect(page.getByTestId('total')).toHaveText('۲۵۰٬۰۰۰ تومان')
+await expect(page.getByRole('alert')).toContainText('موجودی کافی نیست')
+
+// ❌ شکننده و کند
+await page.waitForTimeout(2000)
+```
+
+Actionها (`click`, `fill`) هم خودشان منتظر actionable بودن (visible, enabled, stable) می‌مانند.
+
+## ۵. تست کامل یک مسیر
+
+```ts
+// e2e/checkout.spec.ts
 import { test, expect } from '@playwright/test'
 
-test('کاربر می‌تواند وظیفه اضافه کند', async ({ page }) => {
-  await page.goto('/')
-  await page.getByPlaceholder('چه کاری باید انجام شود؟').fill('خرید نان')
-  await page.getByPlaceholder('چه کاری باید انجام شود؟').press('Enter')
-  await expect(page.getByRole('listitem').filter({ hasText: 'خرید نان' })).toBeVisible()
+test.describe('خرید', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'افزودن پیتزا به سبد' }).click()
+    await page.getByRole('link', { name: 'سبد خرید' }).click()
+  })
+
+  test('کاربر می‌تواند سفارش را ثبت کند', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'سبد خرید' })).toBeVisible()
+    await page.getByLabel('نام').fill('سارا')
+    await page.getByLabel('آدرس').fill('تهران، خیابان ولیعصر')
+    await page.getByRole('button', { name: 'ثبت سفارش' }).click()
+
+    await expect(page.getByRole('status')).toContainText('سفارش شما ثبت شد')
+    await expect(page).toHaveURL(/\/orders\/\d+/)
+  })
+
+  test('خطای اعتبارسنجی نمایش داده می‌شود', async ({ page }) => {
+    await page.getByRole('button', { name: 'ثبت سفارش' }).click()
+    await expect(page.getByRole('alert')).toContainText('نام الزامی است')
+    await expect(page).toHaveURL(/\/cart/)
+  })
 })
 ```
 
-## ۴. Locatorها: کاربرمحور، نه CSS شکننده
+### Page Object Model: وقتی تست‌ها زیاد می‌شوند
+
+منطق صفحه را یک‌بار بنویسید و در چند تست استفاده کنید:
 
 ```ts
-page.getByRole('button', { name: 'افزودن' })
-page.getByLabel('ایمیل')
-page.getByPlaceholder('جستجو…')
-page.getByText('فاکتور صادر شد')
-page.getByTestId('cart-total')
-
-// زنجیره‌ای
-page.getByRole('listitem').filter({ hasText: 'خرید نان' }).getByRole('button', { name: 'حذف' })
-```
-
-| خوب | بد |
-| --- | --- |
-| `getByRole('button', { name: 'ذخیره' })` | `page.locator('.btn.btn-primary')` |
-| `getByLabel('ایمیل')` | `page.locator('#input-3')` |
-| `getByTestId('cart-total')` | مسیرهای XPath طولانی |
-
-مزیت پنهان: اگر با role/label تست کنید، دسترس‌پذیری اپ هم خودکار بررسی می‌شود.
-
-## ۵. Assertionهای web-first
-
-```ts
-await expect(page.getByRole('heading', { name: 'سفارش‌ها' })).toBeVisible()
-await expect(page.getByTestId('total')).toHaveText('۲۵۴٬۲۵۰')
-await expect(page.getByRole('button', { name: 'ذخیره' })).toBeEnabled()
-await expect(page.getByRole('alert')).toContainText('نامعتبر')
-await expect(page).toHaveURL(/\/orders\/\d+/)
-await expect(page.getByRole('listitem')).toHaveCount(3)
-```
-
-`expect` در Playwright **خودکار منتظر می‌ماند** تا شرط برقرار شود. به همین دلیل نیازی به `waitForTimeout` ندارید:
-
-```ts
-// ❌ شکننده و کند
-await page.click('#save')
-await page.waitForTimeout(2000)
-expect(await page.textContent('.status')).toBe('ذخیره شد')
-
-// ✅
-await page.getByRole('button', { name: 'ذخیره' }).click()
-await expect(page.getByRole('status')).toHaveText('ذخیره شد')
-```
-
-## ۶. Page Object Model
-
-```ts
-// tests/pages/todo.page.ts
+// e2e/pages/cart.page.ts
 import { type Page, expect } from '@playwright/test'
 
-export class TodoPage {
+export class CartPage {
   constructor(private readonly page: Page) {}
 
   async goto() {
-    await this.page.goto('/')
+    await this.page.goto('/cart')
+    await expect(this.page.getByRole('heading', { name: 'سبد خرید' })).toBeVisible()
   }
 
-  async add(text: string) {
-    const input = this.page.getByPlaceholder('چه کاری باید انجام شود؟')
-    await input.fill(text)
-    await input.press('Enter')
+  async fillCustomer(name: string, address: string) {
+    await this.page.getByLabel('نام').fill(name)
+    await this.page.getByLabel('آدرس').fill(address)
   }
 
-  item(text: string) {
-    return this.page.getByRole('listitem').filter({ hasText: text })
+  async submit() {
+    await this.page.getByRole('button', { name: 'ثبت سفارش' }).click()
   }
 
-  async complete(text: string) {
-    await this.item(text).getByRole('checkbox').check()
-  }
-
-  async expectCount(n: number) {
-    await expect(this.page.getByRole('listitem')).toHaveCount(n)
+  get confirmation() {
+    return this.page.getByRole('status')
   }
 }
 ```
 
 ```ts
-// tests/e2e/todo.spec.ts
-import { test, expect } from '@playwright/test'
-import { TodoPage } from '../pages/todo.page'
+// تست
+import { CartPage } from './pages/cart.page'
 
-test.describe('اپ وظایف', () => {
-  let todo: TodoPage
-
-  test.beforeEach(async ({ page }) => {
-    todo = new TodoPage(page)
-    await todo.goto()
-  })
-
-  test('افزودن و تکمیل وظیفه', async ({ page }) => {
-    await todo.add('خرید نان')
-    await todo.add('تماس با مشتری')
-    await todo.expectCount(2)
-
-    await todo.complete('خرید نان')
-    await expect(todo.item('خرید نان').getByRole('checkbox')).toBeChecked()
-  })
-
-  test('فیلتر وظایف تکمیل‌شده', async ({ page }) => {
-    await todo.add('کار ۱')
-    await todo.complete('کار ۱')
-    await page.getByRole('link', { name: 'تکمیل‌شده' }).click()
-    await expect(page.getByRole('listitem')).toHaveCount(1)
-  })
+test('ثبت سفارش', async ({ page }) => {
+  const cart = new CartPage(page)
+  await cart.goto()
+  await cart.fillCustomer('سارا', 'تهران')
+  await cart.submit()
+  await expect(cart.confirmation).toContainText('سفارش شما ثبت شد')
 })
 ```
 
-## ۷. Fixture سفارشی
+POM را بیش از حد انتزاعی نکنید: فقط locatorها و اکشن‌های همان صفحه، بدون assertionهای سناریو (assertion در تست بماند).
+
+## ۶. احراز هویت یک‌بار برای همه
 
 ```ts
-// tests/fixtures.ts
-import { test as base } from '@playwright/test'
-import { TodoPage } from './pages/todo.page'
-
-export const test = base.extend<{ todo: TodoPage }>({
-  todo: async ({ page }, use) => {
-    const todo = new TodoPage(page)
-    await todo.goto()
-    await use(todo)
-  }
-})
-export { expect } from '@playwright/test'
-```
-
-## ۸. حالت احراز هویت
-
-```ts
-// tests/auth.setup.ts
+// e2e/auth.setup.ts
 import { test as setup, expect } from '@playwright/test'
-
-const authFile = 'playwright/.auth/user.json'
 
 setup('ورود', async ({ page }) => {
   await page.goto('/login')
-  await page.getByLabel('ایمیل').fill(process.env.E2E_EMAIL!)
-  await page.getByLabel('رمز عبور').fill(process.env.E2E_PASSWORD!)
+  await page.getByLabel('ایمیل').fill('demo@example.com')
+  await page.getByLabel('رمز').fill('demo1234')
   await page.getByRole('button', { name: 'ورود' }).click()
   await expect(page.getByRole('heading', { name: 'داشبورد' })).toBeVisible()
-  await page.context().storageState({ path: authFile })
+  await page.context().storageState({ path: 'e2e/.auth/user.json' })
 })
 ```
 
@@ -216,69 +196,175 @@ projects: [
   { name: 'setup', testMatch: /auth\.setup\.ts/ },
   {
     name: 'chromium',
-    use: { ...devices['Desktop Chrome'], storageState: 'playwright/.auth/user.json' },
+    use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/user.json' },
     dependencies: ['setup']
   }
 ]
 ```
 
-## ۹. CI با GitHub Actions
+`e2e/.auth` را در `.gitignore` بگذارید؛ توکن واقعی است.
+
+## ۷. Mock شبکه
+
+```ts
+test('پیام خطای سرور نمایش داده می‌شود', async ({ page }) => {
+  await page.route('**/api/checkout', (route) =>
+    route.fulfill({ status: 500, json: { error: { message: 'خطای سرور' } } })
+  )
+
+  await page.goto('/cart')
+  await page.getByRole('button', { name: 'ثبت سفارش' }).click()
+  await expect(page.getByRole('alert')).toContainText('خطای سرور')
+})
+
+test('پاسخ کند', async ({ page }) => {
+  await page.route('**/api/products', async (route) => {
+    await new Promise((r) => setTimeout(r, 1500))
+    await route.continue()
+  })
+  await page.goto('/')
+  await expect(page.getByText('در حال بارگذاری…')).toBeVisible()
+})
+```
+
+برای تست حالت‌های خطا/کندی که ساختنشان در محیط واقعی سخت است.
+
+## ۸. اشکال‌زدایی
+
+```bash
+npx playwright test --ui
+npx playwright test --debug
+npx playwright codegen http://localhost:5173
+npx playwright show-trace test-results/.../trace.zip
+```
+
+Trace شامل DOM snapshot در هر مرحله، شبکه، console و منبع خطاست؛ بهترین ابزار برای تست شکست‌خورده در CI.
+
+## ۹. تست دسترس‌پذیری
+
+```bash
+npm i -D @axe-core/playwright
+```
+
+```ts
+import AxeBuilder from '@axe-core/playwright'
+
+test('صفحه‌ی سبد بدون خطای a11y', async ({ page }) => {
+  await page.goto('/cart')
+  const results = await new AxeBuilder({ page }).analyze()
+  expect(results.violations).toEqual([])
+})
+```
+
+## ۱۰. اجرا در CI
 
 ```yaml
-# .github/workflows/e2e.yml
-name: E2E
-
-on:
-  pull_request:
-  push:
-    branches: [main]
-
+name: e2e
+on: [push, pull_request]
 jobs:
   test:
-    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+        with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npx playwright install --with-deps
-      - run: npm run build
+      - run: npx playwright install --with-deps chromium
       - run: npx playwright test
         env:
-          BASE_URL: http://localhost:4173
+          BASE_URL: http://localhost:5173
+          CI: 'true'
       - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
+        if: failure()
         with:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
 ```
 
-## ۱۰. دیباگ
+برای تست‌های زیاد از sharding استفاده کنید:
 
 ```bash
-npx playwright test --ui            # حالت UI تعاملی (بهترین ابزار)
-npx playwright test --debug         # Inspector گام‌به‌گام
-npx playwright test --headed
-npx playwright show-trace trace.zip
-npx playwright codegen http://localhost:5173
+npx playwright test --shard=1/4
 ```
 
-`trace: 'on-first-retry'` را نگه دارید: وقتی تست در CI شکست، trace دقیقاً نشان می‌دهد چه اتفاقی افتاده.
+## ۱۱. ساخت گام‌به‌گام تست فروشگاه (تمرین)
 
-## ۱۱. ضدالگوها
+**گام ۱ — اپ:** یک فروشگاه کوچک با لیست محصول، سبد، فرم و صفحه‌ی تأیید.
 
-| ضدالگو | جایگزین |
+**گام ۲ — setup:** `playwright.config.ts` با `webServer` و project کروم.
+
+**گام ۳ — مسیر خوش:** افزودن به سبد → سبد → فرم → ثبت → URL تأیید؛ locatorها را در `CartPage` بگذارید.
+
+**گام ۴ — مسیر خطا:** فرم خالی؛ انتظار پیام و ماندن در صفحه.
+
+**گام ۵ — شبکه:** mock خطای ۵۰۰ و حالت loading.
+
+**گام ۶ — auth:** setup + storageState برای مسیرهای محافظت‌شده.
+
+**گام ۷ — mobile:** project با `Pixel 7`؛ بررسی منو و هدف لمس.
+
+**گام ۸ — a11y:** axe روی سه صفحه‌ی اصلی.
+
+**گام ۹ — CI:** اجرا با retries و آپلود trace در شکست.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
 | --- | --- |
-| `waitForTimeout` | assertion خودکارانتظار |
-| selectorهای CSS عمیق | role/label/testid |
-| تست وابسته به ترتیب | هر تست مستقل، داده‌ی خودش |
-| داده‌ی تولیدی مشترک | seed یا API در `beforeEach` |
-| تست همه‌چیز در یک فایل بزرگ | specهای کوچک بر اساس قابلیت |
+| `config` | بخش ۲ |
+| `locators` | بخش ۳ |
+| `pom` | بخش ۵ (Page Object Model) |
+| `assertions` | بخش ۴ |
+| `ci` | بخش ۱۰ |
 
-## تمرین این درس
+## ۱۲. عیب‌یابی
 
-مجموعه‌ی E2E برای اپ وظایف: افزودن/تکمیل/فیلتر/حذف، locatorهای کاربرمحور، Page Object، پیکربندی چند مرورگر و workflow گیت‌هاب. جزئیات در تب تمرین است.
+| نشانه | علت | راه‌حل |
+| --- | --- | --- |
+| strict mode violation | locator چند عنصر | دقیق‌تر/filter/first |
+| تست محلی سبز، CI قرمز | زمان/منبع/داده | trace، retries، انتظار درست |
+| element not visible | انیمیشن/پوشش | `expect(...).toBeVisible()` و بررسی CSS |
+| تست به هم می‌ریزد | داده‌ی مشترک | داده‌ی یکتا per test |
+| ورود هر تست | storageState ندارد | setup project |
+| could not find browser | بدون install | `npx playwright install --with-deps` |
+| تست کند | sleepهای واقعی | حذف waitForTimeout |
+
+## ۱۳. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا `waitForTimeout` بد است؟
+
+**پاسخ:** زمان‌بندی را حدس می‌زند؛ روی CI کندتر می‌شود یا زمان هدر می‌رود. assertion خودکار بهتر است.
+
+**۲.** چرا `getByRole` پایدارتر از CSS است؟
+
+**پاسخ:** به ساختار DOM و کلاس‌ها وابسته نیست و همان چیزی است که کاربر می‌بیند.
+
+**۳.** چرا `storageState` امنیت را بهتر می‌کند؟
+
+**پاسخ:** یک‌بار ورود، بدون تکرار و بدون قرار دادن رمز در هر تست.
+
+**۴.** چه زمانی باید شبکه را mock کنیم؟
+
+**پاسخ:** برای حالت‌های سخت (خطا/کندی/مرز) — نه برای مسیر خوش که باید واقعی تست شود.
+
+## ۱۴. خودآزمایی
+
+1. E2E چه زمانی انتخاب درست است؟
+2. locator strict یعنی چه؟
+3. web-first assertion چگونه کار می‌کند؟
+4. setup project چه کاری می‌کند؟
+5. trace چه اطلاعاتی دارد؟
+6. sharding برای چه؟
+
+## ۱۵. چک‌لیست تحویل
+
+- [ ] config با webServer و baseURL
+- [ ] locatorهای role/label
+- [ ] بدون waitForTimeout
+- [ ] مسیر خوش + خطا
+- [ ] auth با storageState
+- [ ] mock برای حالت‌های سخت
+- [ ] project موبایل
+- [ ] axe روی صفحات اصلی
+- [ ] CI با artifact trace

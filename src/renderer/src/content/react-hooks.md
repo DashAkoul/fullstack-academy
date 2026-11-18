@@ -1,72 +1,82 @@
 # React و Hooks
 
-> مرجع رسمی: [react.dev — Learn](https://react.dev/learn) و [Built-in Hooks](https://react.dev/reference/react/hooks)
+> مرجع رسمی: [react.dev — Learn](https://react.dev/learn) · [Hooks Reference](https://react.dev/reference/react/hooks) · [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect)
 
-React یک کتابخانه‌ی UI است که بر پایه‌ی سه ایده بنا شده: **کامپوننت**، **state** و **رندر یک‌طرفه (declarative)**. شما می‌گویید UI در هر حالت «چه شکلی» است؛ React DOM را هماهنگ می‌کند.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. کامپوننت و props
+این درس مدل رندر React را توضیح می‌دهد تا بدانید state کجا باید زندگی کند، چرا effectها منبع باگ‌اند، چطور درخواست‌ها را لغو کنید و چطور یک Custom Hook قابل تست بنویسید. در پایان، برد کانبان تمرین را با reducer، ذخیره‌سازی محلی، جستجوی بهینه و فرم کنترل‌شده می‌سازید.
+
+---
+
+## ۱. مدل رندر: UI = f(state)
 
 ```tsx
-type BadgeProps = { label: string; tone?: 'neutral' | 'success' | 'danger' }
-
-export function Badge({ label, tone = 'neutral' }: BadgeProps) {
-  const tones = {
-    neutral: 'bg-slate-700 text-slate-100',
-    success: 'bg-emerald-600 text-white',
-    danger: 'bg-rose-600 text-white'
-  }
-  return <span className={`rounded-full px-2 py-0.5 text-xs ${tones[tone]}`}>{label}</span>
+function Counter() {
+  const [count, setCount] = useState(0)
+  return <button onClick={() => setCount(count + 1)}>{count}</button>
 }
 ```
 
-قواعد:
+با هر `setState`:
 
-- نام کامپوننت با حرف بزرگ.
-- props را تایپ کنید؛ مقادیر پیش‌فرض با destructuring.
-- کامپوننت را خالص نگه دارید: ورودی یکسان → خروجی یکسان.
-- `children` را وقتی لازم است explicit تایپ کنید: `{ children }: { children: ReactNode }`.
+1. React کامپوننت را دوباره **فراخوانی** می‌کند (render).
+2. خروجی جدید (درخت element) با قبلی مقایسه می‌شود (reconciliation).
+3. فقط تفاوت‌ها روی DOM اعمال می‌شود (commit).
 
-## ۲. useState
+نتیجه‌ها:
+
+- رندر باید **خالص** باشد: محاسبه‌ی DOM، fetch، `localStorage.setItem` در بدنه‌ی کامپوننت ممنوع.
+- StrictMode در توسعه کامپوننت را دو بار رندر می‌کند تا ناخالصی را لو بدهد؛ دوبار رندر شدن طبیعی است.
+- state در هر رندر یک **snapshot** است:
 
 ```tsx
-const [count, setCount] = useState(0)
-const [user, setUser] = useState<User | null>(null)
-const [items, setItems] = useState<Item[]>(() => loadFromStorage()) // lazy init
+function handle() {
+  setCount(count + 1)
+  setCount(count + 1)   // هر دو از همان count فعلی → +1 نه +2
+  setCount((c) => c + 1) // ✅ updater
+  setCount((c) => c + 1) // ✅ +2
+}
 ```
 
-به‌روزرسانی مبتنی بر مقدار قبلی:
+## ۲. State: قواعدی که باگ‌ها را حذف می‌کند
 
 ```tsx
-setCount((c) => c + 1)          // ✅ امن در به‌روزرسانی‌های پشت‌سرهم
-setCount(count + 1)             // ⚠️ ممکن است مقدار کهنه ببیند
-```
-
-State را **کم** نگه دارید. اگر می‌توانید از props یا حالت موجود محاسبه کنید، در state نگه ندارید:
-
-```tsx
-// ❌ دو منبع حقیقت
 const [items, setItems] = useState<Item[]>([])
+const [user, setUser] = useState<User | null>(null)
+const [draft, setDraft] = useState(() => localStorage.getItem('draft') ?? '') // lazy init
+```
+
+1. **state را کم نگه دارید**: هر چیزی از props یا state دیگر قابل محاسبه است، state نباشد (جمع، تعداد، فیلترشده).
+2. **state را immutable به‌روز کنید**: `setItems([...items, item])`، نه `items.push(item)`.
+3. state مرتبط را در یک آبجکت/وضعیت واحد نگه دارید تا همیشه هم‌زمان تغییر کنند.
+4. state را در پایین‌ترین کامپوننت مشترک قرار دهید (colocation).
+
+```tsx
+// ❌ سه منبع حقیقت که ممکن است ناهماهنگ شوند
+const [items, setItems] = useState<Item[]>([])
+const [count, setCount] = useState(0)
 const [total, setTotal] = useState(0)
 
-// ✅ مشتق شده
+// ✅ مشتق‌شده در رندر
+const count = items.length
 const total = items.reduce((s, i) => s + i.price * i.qty, 0)
 ```
 
-## ۳. رندر لیست و `key`
+## ۳. لیست‌ها و `key`: هویت، نه ترتیب
 
 ```tsx
 <ul>
-  {items.map((item) => (
-    <li key={item.id}>{item.title}</li>
+  {tasks.map((task) => (
+    <li key={task.id}><TaskRow task={task} /></li>
   ))}
 </ul>
 ```
 
-`key` هویت آیتم را به React می‌گوید. استفاده از index باعث باگ‌های ظریف در مرتب‌سازی/حذف می‌شود. اگر داده‌ی شما `id` ندارد، ساخت id در زمان ساخت داده بهتر از index است.
+React با `key` می‌فهمد کدام آیتم «همان» است. با `index`، بعد از حذف/مرتب‌سازی، state کامپوننت‌های داخلی (مثل متن ویرایش‌نشده یا فوکوس) جابه‌جا می‌شود. اگر داده `id` ندارد، هنگام ساخت داده `crypto.randomUUID()` بدهید.
 
-## ۴. useEffect — و چرا اغلب لازم نیست
+## ۴. useEffect: آخرین ابزار، نه اولی
 
-`useEffect` برای **همگام‌سازی با دنیای بیرون** است: شبکه، تایمر، اشتراک (subscription)، DOM خارجی.
+effect برای **همگام‌سازی با بیرون React** است: شبکه، تایمر، اشتراک، DOM غیر React.
 
 ```tsx
 useEffect(() => {
@@ -77,57 +87,73 @@ useEffect(() => {
       const res = await fetch(`/api/users/${id}`, { signal: controller.signal })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setUser(await res.json())
-    } catch (e) {
-      if (!controller.signal.aborted) setError(String(e))
+    } catch (err) {
+      if (controller.signal.aborted) return
+      setError(err instanceof Error ? err.message : 'خطای نامشخص')
     }
   }
 
   load()
-  return () => controller.abort()   // پاک‌سازی
+  return () => controller.abort()
 }, [id])
 ```
 
-اشتباهات رایج:
+- **آرایه‌ی وابستگی** باید همه‌ی مقادیر بیرونی خوانده‌شده را داشته باشد؛ linter را جدی بگیرید.
+- **cleanup** برای تایمر، listener و درخواست ضروری است.
+- با `id` جدید، effect قبلی cleanup می‌شود و درخواست قبلی لغو می‌شود (جلوگیری از race).
 
-| اشتباه | مشکل | درست |
-| --- | --- | --- |
-| `[]` خالی با متغیر بیرونی | داده‌ی کهنه | همه‌ی وابستگی‌ها را بنویسید |
-| fetch بدون abort | race condition | `AbortController` |
-| effect برای محاسبه‌ی مقدار | رندر اضافه و پیچیدگی | محاسبه در بدنه‌ی رندر |
-| تنظیم state از props | دو منبع حقیقت | key یا محاسبه |
+**وقتی Effect لازم نیست:**
 
-طبق مستندات React: **«You Might Not Need an Effect»** — قبل از نوشتن effect، بپرسید آیا این می‌تواند در event handler یا در حین رندر حل شود.
+| نیاز | راه درست |
+| --- | --- |
+| محاسبه‌ی مقدار از props/state | محاسبه در رندر (+ `useMemo` اگر سنگین است) |
+| واکنش به کلیک | کد در event handler |
+| همگام‌سازی state با prop | `key` روی کامپوننت یا محاسبه |
+| fetch اولیه در Next.js | Server Component |
 
-## ۵. useRef
-
-دو کاربرد:
+## ۵. useRef: DOM و مقدار بدون رندر
 
 ```tsx
-// 1) دسترسی به DOM
 const inputRef = useRef<HTMLInputElement>(null)
-useEffect(() => inputRef.current?.focus(), [])
+const renders = useRef(0)
+renders.current += 1
 
-// 2) نگه‌داری مقدار بدون رندر
-const renderCount = useRef(0)
-renderCount.current++
+useEffect(() => inputRef.current?.focus(), [])
 ```
 
-## ۶. useMemo و useCallback
+تغییر `ref.current` رندری ایجاد نمی‌کند؛ برای داده‌ای است که UI به آن وابسته نیست یا برای نگه‌داشتن مقدار بین رندرها (تایمر، آخرین مقدار).
+
+## ۶. useReducer: وقتی تغییرات پیچیده‌اند
 
 ```tsx
-const visible = useMemo(
-  () => tasks.filter((t) => t.title.includes(query)),
-  [tasks, query]
-)
+type Task = { id: string; title: string; done: boolean }
+type Action =
+  | { type: 'add'; title: string }
+  | { type: 'toggle'; id: string }
+  | { type: 'remove'; id: string }
+  | { type: 'rename'; id: string; title: string }
 
-const onToggle = useCallback((id: string) => setTasks((ts) => ts.map(...)), [])
+function tasksReducer(state: Task[], action: Action): Task[] {
+  switch (action.type) {
+    case 'add':
+      return [...state, { id: crypto.randomUUID(), title: action.title, done: false }]
+    case 'toggle':
+      return state.map((t) => (t.id === action.id ? { ...t, done: !t.done } : t))
+    case 'remove':
+      return state.filter((t) => t.id !== action.id)
+    case 'rename':
+      return state.map((t) => (t.id === action.id ? { ...t, title: action.title } : t))
+    default:
+      return state
+  }
+}
 ```
 
-قاعده: **اول اندازه بگیرید، بعد بهینه کنید.** `useMemo` برای محاسبات سنگین یا وابستگی هویتی در `useEffect` مفید است؛ برای `a + b` فقط نویز است.
+مزیت: reducer یک تابع خالص است؛ بدون React تست می‌شود و همه‌ی گذارهای مجاز در یک جا هستند.
 
-## ۷. Custom Hook — بازاستفاده‌ی منطق
+## ۷. Custom Hooks: منطق قابل استفاده‌ی مجدد
 
-```ts
+```tsx
 export function useLocalStorage<T>(key: string, initial: T) {
   const [value, setValue] = useState<T>(() => {
     try {
@@ -141,8 +167,8 @@ export function useLocalStorage<T>(key: string, initial: T) {
   useEffect(() => {
     try {
       localStorage.setItem(key, JSON.stringify(value))
-    } catch (e) {
-      console.warn('ذخیره‌سازی ناموفق', e)
+    } catch (err) {
+      console.warn('ذخیره‌سازی ناموفق', err)
     }
   }, [key, value])
 
@@ -154,62 +180,156 @@ export function useLocalStorage<T>(key: string, initial: T) {
 const [tasks, setTasks] = useLocalStorage<Task[]>('kanban.tasks', [])
 ```
 
-هر Hook باید با `use` شروع شود؛ این قاعده‌ی linter است، نه سلیقه.
+```tsx
+export function useDebounced<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return debounced
+}
+```
 
-## ۸. فرم‌های کنترل‌شده
+قواعد Hook: فقط در سطح بالای کامپوننت/Hook، نه داخل شرط/حلقه. نام با `use` شروع شود.
+
+## ۸. فرم‌ها: کنترل‌شده و معتبر
 
 ```tsx
 const [title, setTitle] = useState('')
+const [error, setError] = useState<string | null>(null)
 
 function submit(e: React.FormEvent) {
   e.preventDefault()
-  const trimmed = title.trim()
-  if (!trimmed) return
-  addTask(trimmed)
+  const value = title.trim()
+  if (value.length < 3) {
+    setError('عنوان باید حداقل ۳ کاراکتر باشد.')
+    return
+  }
+  addTask(value)
   setTitle('')
+  setError(null)
 }
 
-<form onSubmit={submit}>
+<form onSubmit={submit} noValidate>
   <label htmlFor="title">عنوان وظیفه</label>
-  <input id="title" value={title} onChange={(e) => setTitle(e.target.value)} />
+  <input
+    id="title"
+    value={title}
+    onChange={(e) => setTitle(e.target.value)}
+    aria-invalid={Boolean(error)}
+    aria-describedby={error ? 'title-error' : undefined}
+  />
+  {error && <p id="title-error" role="alert">{error}</p>}
   <button disabled={!title.trim()}>افزودن</button>
 </form>
 ```
 
-## ۹. الگوی وضعیت درخواست
+## ۹. بهینه‌سازی: اندازه بگیرید، حدس نزنید
+
+```tsx
+const visible = useMemo(
+  () => tasks.filter((t) => t.title.includes(query)),
+  [tasks, query]
+)
+
+const onToggle = useCallback((id: string) => dispatch({ type: 'toggle', id }), [])
+```
+
+- `React.memo` فقط وقتی مفید است که propها پایدار بمانند.
+- `useMemo` برای محاسبه‌ی سنگین یا پایداری هویت در dependency.
+- با React DevTools → Profiler ببینید کدام کامپوننت و چرا رندر می‌شود.
+- در React 19 کامپایلر می‌تواند بخشی از این‌ها را خودکار کند؛ همچنان مدل ذهنی لازم است.
+
+## ۱۰. ساخت گام‌به‌گام برد کانبان (تمرین)
+
+**گام ۱ — تایپ‌ها**
 
 ```ts
-type Async<T> =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'error'; message: string }
-  | { status: 'success'; data: T }
+type Status = 'todo' | 'doing' | 'done'
+interface Task { id: string; title: string; status: Status; createdAt: number }
+const COLUMNS: { id: Status; title: string }[] = [
+  { id: 'todo', title: 'برای انجام' },
+  { id: 'doing', title: 'در حال انجام' },
+  { id: 'done', title: 'انجام‌شده' }
+]
 ```
 
-با discriminated union، رندر بر اساس `status` ساده و exhaustive می‌شود و ترکیب‌های ناممکن (loading + error) حذف می‌شوند.
+**گام ۲ — reducer** با actionهای add/rename/remove/move و state پایه از `useLocalStorage`.
 
-## ۱۰. ساختار پیشنهادی پروژه
+**گام ۳ — کامپوننت‌ها:** `Board` (state و dispatch)، `Column` (فیلتر بر اساس status)، `TaskCard` (نمایش + دکمه‌ها)، `TaskForm`. key = `task.id`.
 
+**گام ۴ — جابه‌جایی:** دکمه‌های «بعدی/قبلی» یا drag-and-drop ساده با HTML5؛ منطق move در reducer.
+
+**گام ۵ — جستجو:** `useDebounced(query)` + `useMemo` برای فیلتر.
+
+**گام ۶ — فوکوس:** `useRef` روی input و فوکوس بعد از افزودن.
+
+**گام ۷ — دسترس‌پذیری:** دکمه‌ی آیکونی با `aria-label`، پیام خالی هر ستون، `role="status"` برای شمارش.
+
+**گام ۸ — تست:** reducer را با Vitest تست کنید؛ حرکت بین ستون‌ها و حذف.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `components` | بخش ۳ و گام ۳ |
+| `state` | بخش ۲ و ۴ |
+| `custom-hook` | بخش ۷ |
+| `effects` | بخش ۴ |
+| `memo-ref` | بخش ۵ و ۹ |
+
+## ۱۱. عیب‌یابی
+
+| نشانه | علت رایج | راه‌حل |
+| --- | --- | --- |
+| state فوراً مقدار جدید را نشان نمی‌دهد | snapshot رندر | از updater یا محاسبه در رندر استفاده کنید |
+| حلقه‌ی بی‌پایان رندر | setState در بدنه یا effect بدون وابستگی درست | وابستگی‌ها را بررسی کنید |
+| داده‌ی قدیمی نمایش داده می‌شود | نبود abort/cleanup | AbortController + بررسی aborted |
+| input با هر تایپ کاراکتر از فوکوس می‌افتد | تعریف کامپوننت داخل کامپوننت | کامپوننت را بیرون ببرید |
+| state بعد از رفرش می‌رود | ذخیره‌سازی نبوده | useLocalStorage |
+| `Each child should have a unique key` | key تکراری/ندارد | id پایدار |
+
+## ۱۲. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا این کد فقط یک بار افزایش می‌دهد؟
+
+```tsx
+setCount(count + 1)
+setCount(count + 1)
 ```
-src/
-├─ components/      ← کامپوننت‌های عمومی (Button، Modal)
-├─ features/kanban/ ← منطق دامنه + کامپوننت‌های همان قابلیت
-├─ hooks/           ← Custom Hookهای مشترک
-├─ lib/             ← api، utils
-└─ App.tsx
-```
 
-مرزبندی بر اساس «قابلیت» بهتر از «نوع فایل» مقیاس می‌گیرد.
+**پاسخ:** هر دو از همان snapshot `count` محاسبه شده‌اند؛ batching آخرین مقدار را اعمال می‌کند. `setCount(c => c + 1)` دوبار.
 
-## چک‌لیست کیفیت
+**۲.** چرا `useEffect(() => setUser({...user, name}), [user])` حلقه می‌سازد؟
 
-- [ ] هیچ state تکراری/مشتق‌شده‌ای وجود ندارد
-- [ ] `key` پایدار است
-- [ ] effectها پاک‌سازی دارند
-- [ ] درخواست‌ها abort می‌شوند
-- [ ] linter (eslint-plugin-react-hooks) بی‌اخطار است
-- [ ] کامپوننت‌ها کوچک و تک‌مسئولیت‌اند
+**پاسخ:** effect state را تغییر می‌دهد که خودش dependency است → رندر → effect → … . راه: محاسبه در رندر یا key.
 
-## تمرین این درس
+**۳.** چه زمانی `useMemo` واقعاً لازم است؟
 
-برد کانبان با React + TypeScript: کامپوننت‌های Board/Column/TaskCard، CRUD و جابه‌جایی وظایف، `useLocalStorage`، جستجو با `useMemo` و فوکوس با `useRef`. جزئیات در تب تمرین است.
+**پاسخ:** محاسبه‌ی سنگین با ورودی پایدار، یا نیاز به هویت پایدار برای dependency/کامپوننت memo‌شده.
+
+**۴.** تفاوت `useRef` و `useState` برای تایمر؟
+
+**پاسخ:** ref رندر ایجاد نمی‌کند و مقدار بین رندرها حفظ می‌شود؛ state برای وقتی است که UI باید با تغییر به‌روز شود.
+
+## ۱۳. خودآزمایی
+
+1. چرا رندر باید خالص باشد؟
+2. تفاوت state مشتق و state ذخیره‌شده؟
+3. سه مورد که Effect لازم نیست؟
+4. cleanup چه زمانی اجرا می‌شود؟
+5. چرا `key` نباید index باشد؟
+6. چه وقت useReducer بهتر از useState است؟
+
+## ۱۴. چک‌لیست تحویل
+
+- [ ] state تکراری/مشتق‌شده ذخیره نمی‌شود
+- [ ] key پایدار در همه‌ی لیست‌ها
+- [ ] effectها cleanup و abort دارند
+- [ ] Custom Hook با تایپ Generic
+- [ ] فرم کنترل‌شده با پیام خطای متصل به input
+- [ ] useMemo/useRef بجا
+- [ ] reducer با تست
+- [ ] بدون خطای eslint-plugin-react-hooks
+- [ ] تست دستی: افزودن/ویرایش/جابه‌جایی/رفرش

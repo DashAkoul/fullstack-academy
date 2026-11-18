@@ -1,240 +1,386 @@
-# GraphQL
+# GraphQL: Schema، Resolver و DataLoader
 
-> مراجع: [graphql.org/learn](https://graphql.org/learn/) · [Apollo Server](https://www.apollographql.com/docs/apollo-server/) · [DataLoader](https://github.com/graphql/dataloader)
+> مراجع: [GraphQL Spec](https://spec.graphql.org/) · [GraphQL.js](https://graphql.org/graphql-js/) · [GraphQL Yoga](https://the-guild.dev/graphql/yoga-server/docs) · [DataLoader](https://github.com/graphql/dataloader)
 
-GraphQL به کلاینت اجازه می‌دهد دقیقاً همان داده‌ای را بخواهد که لازم دارد. هزینه‌اش: طراحی schema، حل مسئله‌ی N+1 و مدیریت خطای متفاوت.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. Schema — قرارداد بین کلاینت و سرور
+یک schema تایپ‌سیف می‌نویسید، resolverها را درست پیاده می‌کنید، مشکل N+1 را با DataLoader حل می‌کنید و خطا/احراز هویت/صفحه‌بندی را حرفه‌ای مدیریت می‌کنید. در پایان، API بلاگ GraphQL تمرین را با کوئری و mutation کارا تحویل می‌دهید.
+
+---
+
+## ۱. Schema قرارداد است
 
 ```graphql
-type Instructor {
-  id: ID!
-  name: String!
-  bio: String
-  courses: [Course!]!
-}
-
-type Review {
-  id: ID!
-  rating: Int!
-  text: String
-  author: String!
-  createdAt: String!
-}
-
-type Course {
-  id: ID!
-  title: String!
-  description: String!
-  price: Int!          # ریال
-  instructor: Instructor!
-  reviews: [Review!]!
-  averageRating: Float
-}
-
-type CourseConnection {
-  items: [Course!]!
-  total: Int!
-  hasMore: Boolean!
-}
-
-input CreateReviewInput {
-  courseId: ID!
-  rating: Int!
-  text: String
-  author: String!
-}
-
+# schema.graphql
 type Query {
-  courses(page: Int = 1, pageSize: Int = 20, search: String): CourseConnection!
-  course(id: ID!): Course
+  posts(first: Int = 20, after: String): PostConnection!
+  post(slug: String!): Post
+  me: User
 }
 
 type Mutation {
-  createReview(input: CreateReviewInput!): Review!
+  createPost(input: CreatePostInput!): CreatePostPayload!
+  publishPost(id: ID!): Post!
+  deletePost(id: ID!): Boolean!
+}
+
+type Post {
+  id: ID!
+  title: String!
+  slug: String!
+  body: String!
+  published: Boolean!
+  createdAt: DateTime!
+  author: User!
+  comments(first: Int = 10): [Comment!]!
+}
+
+type User {
+  id: ID!
+  name: String!
+  posts: [Post!]!
+}
+
+type Comment {
+  id: ID!
+  body: String!
+  author: User
+}
+
+type PostConnection {
+  edges: [PostEdge!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type PostEdge { cursor: String!; node: Post! }
+type PageInfo { hasNextPage: Boolean!; endCursor: String }
+
+input CreatePostInput {
+  title: String!
+  slug: String!
+  body: String!
+  tagNames: [String!] = []
+}
+
+type CreatePostPayload {
+  post: Post
+  errors: [UserError!]!
+}
+
+type UserError { field: String; message: String! }
+
+scalar DateTime
+```
+
+قواعد طراحی:
+
+- `!` یعنی غیرnull. **سخت‌گیرانه نباشید**: اگر eventual consistency دارید یا خطای جزئی ممکن است، nullable بگذارید.
+- لیست‌ها: `[Post!]!` یعنی خود لیست و اعضایش null نیستند.
+- ورودی‌ها را با `input` بدهید؛ خروجی mutation را با payload (هم داده هم خطا) برگردانید تا خطای قابل‌نمایش بدون از دست دادن داده داشته باشید.
+- از scalar سفارشی برای تاریخ استفاده کنید (نه String خام).
+
+## ۲. Resolver: هر فیلد یک تابع
+
+```ts
+// resolvers/post.ts
+export const Post = {
+  author: (parent: PostRow, _args: unknown, ctx: Context) =>
+    ctx.loaders.userById.load(parent.authorId),
+
+  comments: (parent: PostRow, args: { first: number }, ctx: Context) =>
+    ctx.prisma.comment.findMany({
+      where: { postId: parent.id },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(args.first, 50)
+    }),
+
+  createdAt: (parent: PostRow) => parent.createdAt.toISOString()
+}
+
+export const Query = {
+  posts: async (_p: unknown, args: { first: number; after?: string }, ctx: Context) => {
+    const take = Math.min(args.first, 50)
+    const rows = await ctx.prisma.post.findMany({
+      where: { published: true },
+      orderBy: { createdAt: 'desc' },
+      take: take + 1,
+      ...(args.after ? { cursor: { id: decodeCursor(args.after) }, skip: 1 } : {})
+    })
+
+    const hasNextPage = rows.length > take
+    const edges = rows.slice(0, take).map((node) => ({
+      cursor: encodeCursor(node.id),
+      node
+    }))
+
+    return {
+      edges,
+      pageInfo: { hasNextPage, endCursor: edges.at(-1)?.cursor ?? null },
+      totalCount: await ctx.prisma.post.count({ where: { published: true } })
+    }
+  },
+
+  post: (_p: unknown, args: { slug: string }, ctx: Context) =>
+    ctx.prisma.post.findUnique({ where: { slug: args.slug } }),
+
+  me: (_p: unknown, _a: unknown, ctx: Context) =>
+    ctx.user ? ctx.prisma.user.findUnique({ where: { id: ctx.user.id } }) : null
 }
 ```
 
-نکته‌ها:
+- Resolver والد را به‌عنوان آرگومان اول می‌گیرد؛ فیلدهای ساده معمولاً resolver لازم ندارند.
+- context جای همه‌ی سرویس‌ها/کاربر است؛ آن را در هر request بسازید.
+- `parent` را mutate نکنید.
 
-- `!` یعنی غیرNullable؛ تا جای ممکن دقیق باشید.
-- برای لیست‌های بزرگ از الگوی Connection استفاده کنید.
-- Input type برای Mutation الزامی است (نه type خروجی).
-
-## ۲. راه‌اندازی Apollo Server
-
-```bash
-npm i @apollo/server graphql @graphql-tools/schema dataloader
-npm i -D tsx typescript @types/node
-```
+## ۳. سرور با GraphQL Yoga
 
 ```ts
-// src/index.ts
-import { ApolloServer } from '@apollo/server'
-import { startStandaloneServer } from '@apollo/server/standalone'
-import { readFileSync } from 'node:fs'
-import { resolvers } from './resolvers.js'
-import { db } from './db.js'
-import { createLoaders } from './loaders.js'
+// src/server.ts
+import { createYoga, createSchema } from 'graphql-yoga'
+import { createServer } from 'node:http'
+import { resolvers } from './resolvers/index.js'
+import { loadSchema } from './schema.js'
+import { createContext } from './context.js'
 
-const typeDefs = readFileSync(new URL('./schema.graphql', import.meta.url), 'utf8')
-
-const server = new ApolloServer({ typeDefs, resolvers })
-
-const { url } = await startStandaloneServer(server, {
-  context: async ({ req }) => ({
-    db,
-    userId: req.headers.authorization?.replace('Bearer ', ''),
-    loaders: createLoaders()   // ← در هر درخواست تازه
-  }),
-  listen: { port: 4000 }
+const yoga = createYoga({
+  schema: createSchema({ typeDefs: await loadSchema(), resolvers }),
+  context: createContext,
+  graphiql: process.env.NODE_ENV !== 'production',
+  maskedErrors: process.env.NODE_ENV === 'production'
 })
 
-console.log(`GraphQL: ${url}`)
+createServer(yoga).listen(4000, () => console.log('http://localhost:4000/graphql'))
 ```
 
-## ۳. Resolverها
-
 ```ts
-// src/resolvers.ts
-import { GraphQLError } from 'graphql'
-import type { Context } from './context.js'
+// src/context.ts
+import DataLoader from 'dataloader'
+import { prisma } from './prisma.js'
+import { verifyToken } from './auth.js'
 
-export const resolvers = {
-  Query: {
-    courses: async (_: unknown, args: { page: number; pageSize: number; search?: string }, ctx: Context) => {
-      const { page, pageSize, search } = args
-      const where = search ? { title: { contains: search } } : {}
-      const [items, total] = await Promise.all([
-        ctx.db.course.findMany({ where, skip: (page - 1) * pageSize, take: pageSize }),
-        ctx.db.course.count({ where })
-      ])
-      return { items, total, hasMore: page * pageSize < total }
-    },
+export async function createContext({ request }: { request: Request }) {
+  const auth = request.headers.get('authorization')
+  const user = auth?.startsWith('Bearer ') ? await verifyToken(auth.slice(7)) : null
 
-    course: async (_: unknown, { id }: { id: string }, ctx: Context) => {
-      const course = await ctx.db.course.findUnique({ where: { id } })
-      if (!course)
-        throw new GraphQLError('دوره پیدا نشد', { extensions: { code: 'NOT_FOUND', id } })
-      return course
-    }
-  },
-
-  Mutation: {
-    createReview: async (_: unknown, { input }: { input: CreateReviewInput }, ctx: Context) => {
-      if (input.rating < 1 || input.rating > 5)
-        throw new GraphQLError('امتیاز باید بین ۱ تا ۵ باشد', { extensions: { code: 'BAD_USER_INPUT' } })
-
-      const course = await ctx.db.course.findUnique({ where: { id: input.courseId } })
-      if (!course) throw new GraphQLError('دوره پیدا نشد', { extensions: { code: 'NOT_FOUND' } })
-
-      return ctx.db.review.create({ data: input })
-    }
-  },
-
-  Course: {
-    instructor: (parent: { instructorId: string }, _: unknown, ctx: Context) =>
-      ctx.loaders.instructorById.load(parent.instructorId),
-
-    reviews: (parent: { id: string }, _: unknown, ctx: Context) =>
-      ctx.loaders.reviewsByCourseId.load(parent.id),
-
-    averageRating: async (parent: { id: string }, _: unknown, ctx: Context) => {
-      const agg = await ctx.db.review.aggregate({
-        where: { courseId: parent.id },
-        _avg: { rating: true }
+  return {
+    prisma,
+    user,
+    loaders: {
+      userById: new DataLoader<string, UserRow | null>(async (ids) => {
+        const users = await prisma.user.findMany({ where: { id: { in: [...ids] } } })
+        const map = new Map(users.map((u) => [u.id, u]))
+        return ids.map((id) => map.get(id) ?? null)
       })
-      return agg._avg.rating
     }
   }
 }
 ```
 
-## ۴. مسئله‌ی N+1 و DataLoader
+## ۴. N+1 و DataLoader
 
-اگر `courses` ده دوره برگرداند و هر دوره `instructor` بخواهد، بدون DataLoader ده کوئری جدا اجرا می‌شود.
+بدون DataLoader، کوئری `posts { author { name } }` برای ۲۰ پست ۲۰ کوئری نویسنده می‌زند.
+
+DataLoader درخواست‌های هم‌زمان را در یک tick جمع می‌کند و با `IN (...)` یک کوئری می‌زند، سپس نتیجه را به ترتیب ورودی برمی‌گرداند و cache می‌کند.
 
 ```ts
-// src/loaders.ts
-import DataLoader from 'dataloader'
-import type { db as Db } from './db.js'
+const loader = new DataLoader<string, UserRow | null>(async (ids) => {
+  const users = await prisma.user.findMany({ where: { id: { in: [...ids] } } })
+  const map = new Map(users.map((u) => [u.id, u]))
+  return ids.map((id) => map.get(id) ?? null)   // طول و ترتیب باید برابر ids باشد
+})
+```
 
-type Instructor = { id: string; name: string; bio?: string | null }
-type Review = { id: string; courseId: string; rating: number; author: string; text?: string | null }
+- DataLoader **per-request** بسازید، نه global (وگرنه داده‌ی کاربران قاطی می‌شود).
+- batch function باید آرایه‌ای هم‌طول ورودی برگرداند؛ برای نبودِ رکورد `null` بدهید.
+- برای batchهای سنگین `maxBatchSize` بگذارید.
 
-export function createLoaders() {
-  const instructorById = new DataLoader<string, Instructor | null>(async (ids) => {
-    const rows = await Db.instructor.findMany({ where: { id: { in: [...ids] } } })
-    const map = new Map(rows.map((r) => [r.id, r]))
-    return ids.map((id) => map.get(id) ?? null)   // ترتیب باید مطابق ids باشد
-  })
+## ۵. Mutation با خطای قابل‌نمایش
 
-  const reviewsByCourseId = new DataLoader<string, Review[]>(async (courseIds) => {
-    const rows = await Db.review.findMany({ where: { courseId: { in: [...courseIds] } } })
-    return courseIds.map((id) => rows.filter((r) => r.courseId === id))
-  })
+```ts
+export const Mutation = {
+  createPost: async (
+    _p: unknown,
+    { input }: { input: { title: string; slug: string; body: string; tagNames: string[] } },
+    ctx: Context
+  ) => {
+    if (!ctx.user) {
+      return { post: null, errors: [{ field: null, message: 'ابتدا وارد شوید.' }] }
+    }
 
-  return { instructorById, reviewsByCourseId }
+    const parsed = createPostSchema.safeParse(input)
+    if (!parsed.success) {
+      return {
+        post: null,
+        errors: parsed.error.issues.map((i) => ({ field: String(i.path[0]), message: i.message }))
+      }
+    }
+
+    try {
+      const post = await ctx.prisma.post.create({
+        data: {
+          ...parsed.data,
+          authorId: ctx.user.id,
+          tags: {
+            connectOrCreate: parsed.data.tagNames.map((name) => ({
+              where: { name },
+              create: { name }
+            }))
+          }
+        }
+      })
+      return { post, errors: [] }
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return { post: null, errors: [{ field: 'slug', message: 'این slug قبلاً استفاده شده است.' }] }
+      }
+      throw err
+    }
+  }
 }
 ```
 
-نکات حیاتی:
+**دو نوع خطا را جدا کنید:**
 
-- DataLoader را **در هر درخواست** بسازید، نه یک بار برای همه؛ وگرنه داده‌ی یک کاربر در context دیگری کش می‌شود (نشت داده).
-- خروجی آرایه باید هم‌طول و هم‌ترتیب ورودی باشد.
-- `{ cache: false }` برای داده‌های حساس/دائماً متغیر در نظر بگیرید.
+| نوع | مثال | نحوه‌ی برگشت |
+| --- | --- | --- |
+| خطای قابل‌انتظار دامنه | slug تکراری، ورودی نامعتبر | فیلد `errors` در payload |
+| خطای غیرمنتظره | DB down، باگ | `throw` → `errors` سطح GraphQL |
 
-## ۵. Query در کلاینت
+## ۶. احراز هویت در سطح فیلد
+
+```ts
+import { GraphQLError } from 'graphql'
+
+export const requireUser = (ctx: Context) => {
+  if (!ctx.user) throw new GraphQLError('UNAUTHENTICATED', { extensions: { code: 'UNAUTHENTICATED' } })
+  return ctx.user
+}
+
+export const Post = {
+  body: (parent: PostRow, _a: unknown, ctx: Context) => {
+    if (!parent.published && parent.authorId !== ctx.user?.id) {
+      throw new GraphQLError('FORBIDDEN', { extensions: { code: 'FORBIDDEN' } })
+    }
+    return parent.body
+  }
+}
+```
+
+GraphQL می‌تواند فیلدهای حساس را لو بدهد؛ دسترسی را **در resolver** بررسی کنید، نه فقط در UI.
+
+## ۷. محدودسازی کوئری
+
+```ts
+import depthLimit from 'graphql-depth-limit'
+import { createComplexityLimitRule } from 'graphql-validation-complexity'
+
+const yoga = createYoga({
+  schema,
+  validationRules: [
+    depthLimit(7),
+    createComplexityLimitRule(1000, { onCost: (cost) => console.log('cost', cost) })
+  ]
+})
+```
+
+- بدون محدودیت، یک کوئری تودرتو می‌تواند سرور را از پا دربیاورد.
+- صفحه‌بندی اجباری: `first` را سقف بزنید و در صورت نیاز `max` در schema.
+- timeout و `maxBatchSize` DataLoader را تنظیم کنید.
+
+## ۸. کلاینت و Codegen
 
 ```graphql
-query CoursePage($id: ID!) {
-  course(id: $id) {
-    title
-    price
-    averageRating
-    instructor { name }
-    reviews { rating author text }
+query Posts($first: Int!) {
+  posts(first: $first) {
+    edges {
+      node { id title slug author { name } }
+    }
+    pageInfo { hasNextPage endCursor }
   }
 }
 ```
 
-فقط فیلدهای لازم را بخواهید؛ یکی از مزایای اصلی GraphQL همین است.
-
-## ۶. مدیریت خطا
-
-| رویکرد | کجا |
-| --- | --- |
-| `GraphQLError` با `extensions.code` | خطای قابل انتظار (NOT_FOUND, BAD_USER_INPUT) |
-| null کردن فیلد | خطای جزئی در یک فیلد |
-| استثنای معمولی | به «Unexpected error» تبدیل می‌شود — پیام در production مخفی می‌شود |
-
-کدهای پیشنهادی: `BAD_USER_INPUT`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`.
-
-## ۷. امنیت و محدودیت‌ها
-
-- **Query depth/complexity limit** بگذارید؛ یک query تودرتو می‌تواند سرور را زمین بزند (`graphql-depth-limit`).
-- **Persisted queries** یا allowlist در production.
-- Introspection را در production غیرفعال کنید.
-- احراز هویت در context؛ autorization در resolver.
-- برای لیست‌ها سقف `pageSize` بگذارید (مثل ۱۰۰).
-
-## ۸. REST یا GraphQL؟
-
-| معیار | REST | GraphQL |
-| --- | --- | --- |
-| کش HTTP | ساده و قوی | نیاز به تنظیم |
-| چند کلاینت متفاوت | چند endpoint | یک endpoint انعطاف‌پذیر |
-| منحنی یادگیری | کم | متوسط |
-| پیچیدگی سرور | کم | schema + N+1 + امنیت query |
-| مناسب | سرویس ساده، عمومی | BFF، اپ‌های چندپلتفرمه |
-
-## ۹. تست سریع
-
 ```bash
-curl -s localhost:4000 -H 'Content-Type: application/json' \
-  -d '{"query":"{ courses(page:1,pageSize:2){ total items { title instructor { name } } } }"}' | jq
+npm i -D @graphql-codegen/cli @graphql-codegen/client-preset
+npx graphql-codegen init
 ```
 
-## تمرین این درس
+Codegen از schema + operationها تایپ تولید می‌کند؛ دیگر حدس نمی‌زنید فیلد چه شکلی است.
 
-Schema دوره/مدرس/دیدگاه با صفحه‌بندی، Mutation افزودن دیدگاه با input و اعتبارسنجی، DataLoader برای روابط، و خطاهای کددار. جزئیات در تب تمرین است.
+## ۹. ساخت گام‌به‌گام API بلاگ (تمرین)
+
+**گام ۱ — schema:** بخش ۱ را در `schema.graphql` بگذارید.
+
+**گام ۲ — context:** Prisma + کاربر از JWT + DataLoaderها.
+
+**گام ۳ — Query:** `posts` با cursor، `post` با slug، `me`.
+
+**گام ۴ — فیلدهای رابطه:** `Post.author` با loader، `Post.comments` با take.
+
+**گام ۵ — Mutation:** `createPost` با payload خطا، `publishPost` با بررسی مالکیت.
+
+**گام ۶ — امنیت:** depth limit، complexity، بررسی دسترسی `body`.
+
+**گام ۷ — تست:** کوئری posts و mutation تکراری slug؛ شمارش کوئری‌های Prisma برای اثبات رفع N+1.
+
+**گام ۸ — Codegen:** operation نمونه و تایپ تولیدشده در کلاینت.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `schema` | بخش ۱ |
+| `resolvers` | بخش ۲ |
+| `dataloader` | بخش ۴ |
+| `inputs` | بخش ۱ و ۵ (input type + اعتبارسنجی) |
+| `errors` | بخش ۵ و ۶ (GraphQLError با کد) |
+
+## ۱۰. عیب‌یابی
+
+| نشانه | علت | راه‌حل |
+| --- | --- | --- |
+| `Cannot return null for non-nullable` | resolver null داد | nullable کنید یا خطا را مدیریت کنید |
+| کندی با رابطه‌ها | N+1 | DataLoader |
+| داده‌ی کاربر A برای B | loader global | per-request |
+| `Field "x" is not defined` | schema/resolver ناهماهنگ | نام‌ها را چک کنید |
+| خطای ۲۰۰ با `errors` | خطای GraphQL | `errors` را در کلاینت بررسی کنید |
+| کوئری مخرب | بدون محدودیت عمق | depth/complexity |
+
+## ۱۱. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا GraphQL روی HTTP همیشه ۲۰۰ برمی‌گرداند؟
+
+**پاسخ:** خطاهای فیلد در بدنه‌ی `errors` گزارش می‌شوند و ممکن است داده‌ی جزئی هم وجود داشته باشد؛ کد وضعیت برای خطاهای انتقال/کل کوئری است.
+
+**۲.** چرا DataLoader باید per-request باشد؟
+
+**پاسخ:** cache آن بین کاربران مشترک می‌شود و نشتی داده رخ می‌دهد؛ همچنین داده‌ی کهنه.
+
+**۳.** چه زمانی فیلد را nullable بگذارید؟
+
+**پاسخ:** وقتی ممکن است legitimately null باشد یا خطای جزئی نباید کل پاسخ را از بین ببرد.
+
+**۴.** چرا ورودی mutation را در `input` می‌بریم؟
+
+**پاسخ:** توسعه‌پذیری، اعتبارسنجی یکجا و امکان افزودن فیلد بدون تغییر امضای resolver.
+
+## ۱۲. خودآزمایی
+
+1. تفاوت Query و Mutation در قرارداد؟
+2. Resolver چهار آرگومان دارد؛ هر کدام چیست؟
+3. DataLoader چه دو کاری می‌کند؟
+4. چطور از کوئری‌های مخرب جلوگیری می‌کنید؟
+5. خطای دامنه را کجا برمی‌گردانید؟
+6. چرا Codegen مفید است؟
+
+## ۱۳. چک‌لیست تحویل
+
+- [ ] schema با input/payload/connection
+- [ ] resolver بدون منطق تکراری
+- [ ] DataLoader برای همه‌ی رابطه‌های پرتکرار
+- [ ] حداقل یک mutation با خطای فیلد
+- [ ] بررسی دسترسی در resolver
+- [ ] depth/complexity limit
+- [ ] cursor pagination
+- [ ] تست + codegen

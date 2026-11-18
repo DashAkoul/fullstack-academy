@@ -1,109 +1,190 @@
 # مدیریت بسته‌ها: npm، pnpm و yarn
 
-> مرجع رسمی: [npm Docs](https://docs.npmjs.com/cli/v10/configuring-npm/package-json) و [pnpm Docs](https://pnpm.io/)
+> مرجع رسمی: [npm Docs](https://docs.npmjs.com/) · [package.json](https://docs.npmjs.com/cli/configuring-npm/package-json) · [pnpm](https://pnpm.io/) · [SemVer](https://semver.org/lang/fa/)
 
-## ۱. `package.json` — شناسنامه‌ی پروژه
+## در این درس چه یاد می‌گیرید؟
+
+می‌فهمید چرا دو نفر با یک `package.json` دو نسخه‌ی متفاوت نصب می‌کنند، lockfile چه نقشی دارد، تفاوت `dependencies` و `devDependencies` کجا دردسر می‌سازد و چطور یک ابزار خط فرمان قابل نصب با npm بسازید (با `bin`، تست و lockfile). در پایان تمرین این درس، یک بسته‌ی واقعی دارید نه یک پوشه‌ی تمرینی.
+
+---
+
+## ۱. `package.json` را مثل قرارداد بخوانید
 
 ```json
 {
-  "name": "@acme/utils",
+  "name": "@acme/unit-cli",
   "version": "1.2.0",
-  "private": false,
-  "description": "ابزارهای مشترک تیم",
+  "description": "ابزار تبدیل واحد در خط فرمان",
   "license": "MIT",
   "type": "module",
+  "bin": { "unit": "./bin/cli.js" },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
   },
-  "bin": { "acme": "./bin/cli.js" },
+  "files": ["dist", "bin", "README.md"],
   "engines": { "node": ">=20" },
-  "files": ["dist", "README.md"],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -p tsconfig.build.json",
+    "start": "node ./bin/cli.js",
     "test": "node --test",
     "lint": "eslint ."
   },
-  "dependencies": { "zod": "^3.23.8" },
-  "devDependencies": { "typescript": "^5.6.0" }
+  "dependencies": { "picocolors": "^1.1.1" },
+  "devDependencies": { "eslint": "^9.0.0" }
 }
 ```
 
-فیلدهای حیاتی برای انتشار:
-
-| فیلد | نقش |
+| فیلد | چرا حیاتی است |
 | --- | --- |
-| `name` | یکتا در رجیستری؛ scope دار @acme/... |
-| `version` | باید در هر انتشار تغییر کند |
-| `files` | سفیدلیست فایل‌های منتشرشده (کوچک‌تر = بهتر) |
-| `main` / `types` / `exports` | نقطه‌ی ورود و تایپ‌ها |
-| `engines` | حداقل نسخه‌ی Node |
-| `private: true` | جلوگیری از انتشار ناخواسته |
+| `name` + `version` | هویت یکتا؛ برای انتشار باید تغییر کند |
+| `type: module` | فایل‌های `.js` به‌صورت ESM تفسیر می‌شوند |
+| `bin` | دستور قابل اجرا پس از نصب (`npx unit`) |
+| `exports` | API عمومی بسته؛ مسیرهای داخلی را می‌بندد |
+| `files` | سفیدلیست انتشار؛ حجم و سطح حمله را کم می‌کند |
+| `engines` | حداقل نسخه‌ی Node؛ با `engine-strict` سخت‌گیرانه می‌شود |
+| `packageManager` | نسخه‌ی pnpm/yarn پروژه (Corepack) |
 
-## ۲. SemVer — نسخه‌بندی معنایی
-
-`MAJOR.MINOR.PATCH` = `1.4.2`
-
-- **MAJOR**: تغییر ناسازگار (breaking) — کد مصرف‌کننده ممکن است بشکند.
-- **MINOR**: قابلیت جدید و سازگار.
-- **PATCH**: رفع باگ سازگار.
-
-در `dependencies`:
-
-| نماد | معنا |
-| --- | --- |
-| `^1.4.2` | اجازه‌ی 1.x.x (پیش‌فرض npm) |
-| `~1.4.2` | اجازه‌ی 1.4.x |
-| `1.4.2` | دقیقاً همین |
-| `*` یا `latest` | خطرناک — هرگز در پروژه‌ی جدی |
-
-> قاعده‌ی عملی: برای کتابخانه‌ها `^` منطقی است؛ برای برنامه‌های production، **lockfile** تعیین‌کننده است، نه range.
-
-## ۳. dependencies یا devDependencies؟
-
-- `dependencies`: چیزی که در زمان اجرا لازم است → `react`, `express`, `zod`.
-- `devDependencies`: فقط برای توسعه/build/test → `typescript`, `vite`, `jest`, `eslint`.
-
-اشتباه رایج: گذاشتن bundler یا typeها در dependencies → حجم و سطح حمله‌ی production بالا می‌رود.
-
-```bash
-npm i express          # dependency
-npm i -D typescript     # devDependency
-npm i -g npm-check-updates   # global (کم استفاده کنید)
+```json
+{ "packageManager": "pnpm@9.12.0", "engines": { "node": ">=20" } }
 ```
 
-## ۴. lockfile — اهمیت واقعی
+## ۲. SemVer: قرارداد نسخه‌ها
 
-لاک‌فایل دقیقاً نسخه و hash همه‌ی وابستگی‌های غیرمستقیم (transitive) را قفل می‌کند.
+`MAJOR.MINOR.PATCH`
+
+- **MAJOR**: تغییر ناسازگار (کد مصرف‌کننده می‌شکند)
+- **MINOR**: قابلیت جدید سازگار
+- **PATCH**: رفع باگ سازگار
+
+پیش‌انتشار: `2.0.0-beta.1` (کمتر از `2.0.0`).
+
+```json
+{
+  "exact": "1.4.2",
+  "patch": "~1.4.2",
+  "minor": "^1.4.2",
+  "range": ">=1.4.2 <2",
+  "any": "*"
+}
+```
+
+| نماد | اجازه می‌دهد |
+| --- | --- |
+| `1.4.2` | فقط همین |
+| `~1.4.2` | `>=1.4.2 <1.5.0` |
+| `^1.4.2` | `>=1.4.2 <2.0.0` |
+| `^0.4.2` | `>=0.4.2 <0.5.0` (نسخه‌های ۰ محافظه‌کارانه‌ترند) |
+
+> `^` برای کتابخانه‌ها منطقی است. برای برنامه‌ی production، **lockfile** است که نسخه‌ی واقعی را تثبیت می‌کند، نه range.
+
+## ۳. وابستگی‌ها: چهار نوع، چهار رفتار
+
+| بخش | زمان لازم است | مثال |
+| --- | --- | --- |
+| `dependencies` | اجرا (production) | `express`, `zod` |
+| `devDependencies` | توسعه/بیلد/تست | `typescript`, `vite`, `eslint` |
+| `peerDependencies` | توسط مصرف‌کننده تأمین می‌شود | `react` در یک کتابخانه‌ی UI |
+| `optionalDependencies` | اگر نصب نشد، ادامه بده | باینری‌های پلتفرمی |
+
+اشتباه رایج: گذاشتن bundler یا type-only packageها در `dependencies` → نصب production سنگین‌تر و سطح حمله بیشتر.
 
 ```bash
-npm ci          # نصب دقیق از lockfile — در CI استفاده کنید
-npm install     # نصب/به‌روزرسانی و بازنویسی lockfile
+npm i express              # dependency
+npm i -D typescript        # devDependency
+npm i -P react             # peer? (در npm 7+ نصب می‌شود ولی برای مصرف‌کننده هم اعلام کنید)
+npm i --omit=dev           # نصب فقط production
+```
+
+## ۴. Lockfile و نصب قابل تکرار
+
+`package-lock.json` (یا `pnpm-lock.yaml`) دقیقاً نسخه و hash کل درخت وابستگی‌ها را قفل می‌کند.
+
+```bash
+npm ci          # نصب دقیق از lockfile؛ برای CI و production
+npm install     # حل مجدد و به‌روزرسانی lockfile
 ```
 
 - lockfile را **همیشه commit کنید**.
-- از `npm ci` در CI/CD استفاده کنید تا build قابل تکرار باشد.
+- در CI فقط `npm ci`؛ اگر lockfile با package.json ناسازگار باشد، خطا می‌دهد (خوب است).
 - `npm install` و `npm ci` را قاطی نکنید.
+- بعد از merge، اگر lockfile تعارض داشت: یکی را بردارید و `npm install` کنید (دستی ادغام نکنید).
 
-## ۵. npm vs pnpm vs yarn
-
-| ویژگی | npm | pnpm | yarn (berry) |
-| --- | --- | --- | --- |
-| نصب‌شده با Node | ✅ | ❌ | ❌ |
-| سرعت/فضا | متوسط | بسیار خوب (hard links) | خوب |
-| Workspace | ✅ | ✅ عالی | ✅ |
-| سخت‌گیری وابستگی | متوسط | بالا (بدون phantom deps) | بالا (PnP) |
-
-pnpm با ساختار `node_modules` غیرتخت، از «phantom dependency» (استفاده از بسته‌ای که در package.json نیست) جلوگیری می‌کند. برای مونوریپو گزینه‌ی بسیار خوبی است.
+## ۵. درخت وابستگی، dedupe و overrides
 
 ```bash
-corepack enable          # مدیریت نسخه‌ی package manager
-corepack use pnpm@9
+npm ls react
+npm dedupe
+npm explain lodash
 ```
 
-## ۶. Monorepo با Workspaces
+گاهی دو نسخه از یک بسته نصب می‌شود (یکی برای A، یکی برای B). `npm dedupe` تلاش می‌کند نسخه‌ی مشترک بسازد، اما اگر rangeها ناسازگار باشند، دو نسخه می‌ماند.
+
+اجبار نسخه (با احتیاط):
+
+```json
+{
+  "overrides": {
+    "lodash": "^4.17.21"
+  }
+}
+```
+
+```json
+{ "resolutions": { "lodash": "^4.17.21" } }
+```
+
+`overrides` برای رفع CVE یا سازگاری موقت است؛ در تیم مستند کنید و در بلندمدت وابستگی را به‌روز کنید.
+
+## ۶. Scripts: چرخه‌ی عمر
+
+```json
+{
+  "scripts": {
+    "prebuild": "node scripts/check-env.js",
+    "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node scripts/copy-assets.js",
+    "test": "node --test",
+    "dev": "node --watch src/server.js"
+  }
+}
+```
+
+- `pre<script>` و `post<script>` خودکار اجرا می‌شوند.
+- `npm run build -- --watch` آرگومان را پاس می‌دهد.
+- `prepare` بعد از نصب بسته اجرا می‌شود؛ برای کتابخانه‌ها مفید و برای مخازن ناشناس خطرناک است.
+
+Portability:
+
+```bash
+npm i -D cross-env rimraf
+"clean": "rimraf dist",
+"start:win": "cross-env PORT=3000 node src/index.js"
+```
+
+`rm -rf` در اسکریپت npm روی ویندوز کار نمی‌کند؛ `rimraf` یا اسکریپت Node استفاده کنید.
+
+## ۷. npm vs pnpm vs yarn
+
+| ویژگی | npm | pnpm | yarn Berry |
+| --- | --- | --- | --- |
+| همراه Node | ✅ | ❌ | ❌ |
+| ساختار `node_modules` | تخت | symlink به store | تخت یا PnP |
+| phantom dependencies | ممکن | جلوگیری می‌شود | با PnP |
+| فضای دیسک | زیاد | کم (hard link) | کم |
+| Workspace | ✅ | ✅ عالی | ✅ |
+
+pnpm وابستگی‌های غیرمستقیم را در دسترس مستقیم قرار نمی‌دهد؛ اگر بسته‌ای را import کردید که در `package.json` نیست، خطا می‌گیرید — همین باعث می‌شود وابستگی‌های واقعی را اعلام کنید.
+
+```bash
+corepack enable
+corepack use pnpm@9
+pnpm add react
+pnpm add -D typescript
+pnpm why react
+```
+
+## ۸. Monorepo با Workspaces
 
 ```yaml
 # pnpm-workspace.yaml
@@ -123,44 +204,161 @@ packages:
 ```
 
 ```bash
-pnpm -r build          # اجرای build در همه پکیج‌ها
-pnpm --filter web dev  # فقط در اپ web
+pnpm -r build              # همه
+pnpm --filter web dev      # فقط web
+pnpm --filter web... build # web و وابستگی‌هایش
 ```
 
-`workspace:*` یعنی از نسخه‌ی محلی استفاده کن، نه رجیستری — تغییرات فوری در همه‌ی اپ‌ها دیده می‌شوند.
-
-## ۷. امنیت وابستگی‌ها
+## ۹. امنیت زنجیره‌ی تأمین
 
 ```bash
 npm audit
-npm audit fix            # فقط patch/minor سازگار
-npm audit fix --force    # ⚠️ ممکن است breaking باشد
-npx npm-check-updates -i # ارتقای تعاملی
+npm audit --omit=dev
+npm audit fix              # فقط سازگار
+npx npm-check-updates -i   # ارتقای تعاملی
 ```
 
 عادت‌های حرفه‌ای:
 
-- وابستگی کمتر = سطح حمله کمتر. قبل از نصب، آیا با ۲۰ خط کد خودتان حل نمی‌شود؟
-- `npm view <pkg> time.modified` → آخرین انتشار؛ بسته‌ی رهاشده را با احتیاط.
-- در CI یک مرحله‌ی `npm audit --omit=dev` بگذارید.
-- `postinstall` اسکریپت‌های ناشناس را محدود کنید (`npm config set ignore-scripts true` برای پروژه‌های حساس).
+- وابستگی کمتر = سطح حمله کمتر. قبل از نصب بپرسید «۲۰ خط کد خودم کافی نیست؟»
+- `postinstall` ناشناس را محدود کنید: `npm config set ignore-scripts true` برای پروژه‌های حساس، سپس فقط بسته‌های لازم را استثنا کنید.
+- به `npm view <pkg> time.modified` نگاه کنید؛ بسته‌ی رهاشده ریسک است.
+- برای انتشار عمومی، npm provenance را فعال کنید.
 
-## ۸. اسکریپت‌ها و `npx`
+## ۱۰. ساخت گام‌به‌گام CLI تبدیل واحد (تمرین)
 
-```bash
-npm run dev -- --port 3000    # پاس دادن آرگومان
-npx playwright install        # اجرای باینری پکیج بدون نصب گلوبال
-npm pkg set scripts.clean="rm -rf dist && rm -rf node_modules/.cache"
+**گام ۱ — ساختار**
+
+```
+fsa-05-unit-cli/
+├─ bin/cli.js
+├─ src/convert.js
+├─ test/convert.test.js
+├─ package.json
+└─ README.md
 ```
 
-اسکریپت‌های پروژه را «مستند زنده» بدانید: هر کاری که هم‌تیمی باید انجام دهد، باید یک `npm run` باشد.
+**گام ۲ — منطق خالص**
 
-## ۹. نکات ویندوز/کراس‌پلتفرم
+```js
+// src/convert.js
+const FACTORS = {
+  km: { base: 'm', factor: 1000 },
+  m: { base: 'm', factor: 1 },
+  cm: { base: 'm', factor: 0.01 },
+  mi: { base: 'm', factor: 1609.344 }
+}
 
-- `rm -rf` در ویندوز کار نمی‌کند؛ از `rimraf` یا اسکریپت Node استفاده کنید.
-- متغیرهای محیطی inline (`PORT=3000 node x.js`) در ویندوز کار نمی‌کند؛ از `cross-env` یا فایل `.env` استفاده کنید.
-- فایل `.npmrc` را commit کنید اگر تنظیمات تیمی دارد (`engine-strict=true`).
+export function convert(value, from, to) {
+  if (!Number.isFinite(value)) throw new TypeError('مقدار باید عدد باشد')
+  if (!FACTORS[from] || !FACTORS[to]) throw new Error('واحد ناشناخته')
+  if (FACTORS[from].base !== FACTORS[to].base) throw new Error('واحدها هم‌خانواده نیستند')
+  return (value * FACTORS[from].factor) / FACTORS[to].factor
+}
+```
 
-## تمرین این درس
+**گام ۳ — CLI با shebang**
 
-یک ابزار CLI تبدیل واحد بسازید که با npm نصب و اجرا می‌شود: package.json کامل با `bin`، `engines`، اسکریپت‌ها، تفکیک درست dependencies، lockfile commit‌شده و چند تست. جزئیات در تب تمرین است.
+```js
+#!/usr/bin/env node
+import { parseArgs } from 'node:util'
+import { convert } from '../src/convert.js'
+
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: { help: { type: 'boolean', short: 'h' } }
+})
+
+if (values.help || positionals.length !== 3) {
+  console.log('استفاده: unit <value> <from> <to>   مثال: unit 10 km mi')
+  process.exit(values.help ? 0 : 1)
+}
+
+const [raw, from, to] = positionals
+try {
+  const result = convert(Number(raw), from, to)
+  console.log(`${raw} ${from} = ${result.toFixed(3)} ${to}`)
+} catch (err) {
+  console.error(`خطا: ${err.message}`)
+  process.exitCode = 1
+}
+```
+
+**گام ۴ — تست با اجراکننده‌ی داخلی Node**
+
+```js
+// test/convert.test.js
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { convert } from '../src/convert.js'
+
+test('کیلومتر به مایل', () => {
+  assert.equal(Number(convert(10, 'km', 'mi').toFixed(3)), 6.214)
+})
+
+test('واحد ناشناخته خطا می‌دهد', () => {
+  assert.throws(() => convert(1, 'km', 'parsec'), /ناشناخته/)
+})
+```
+
+**گام ۵ — `package.json` کامل** با `bin`، `engines`، `scripts`، `license`، `files`.
+
+**گام ۶ — lockfile و README**؛ تست دستی: `node bin/cli.js 10 km mi` و `npm link` برای اجرای `unit`.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `package-json` | بخش ۱، گام ۵ |
+| `deps` | بخش ۳ |
+| `cli` | گام ۳ |
+| `lockfile` | بخش ۴ و گام ۶ |
+| `tests` | گام ۴ |
+
+## ۱۱. عیب‌یابی
+
+| خطا | معنا | راه‌حل |
+| --- | --- | --- |
+| `E404` | بسته/نسخه پیدا نشد | نام و رجیستری را بررسی کنید |
+| `ERESOLVE unable to resolve dependency tree` | تعارض peer | نسخه‌ها را هم‌تراز کنید یا `--legacy-peer-deps` (آخرین راه) |
+| `EACCES` | مجوز پوشه‌ی global | از nvm یا مسیر کاربر استفاده کنید؛ با sudo نصب نکنید |
+| `ENOENT package.json` | اجرا در پوشه‌ی اشتباه | `pwd` و `npm prefix` |
+| `Cannot find module` بعد از نصب pnpm | وابستگی اعلام‌نشده (phantom) | با `pnpm add` اضافه کنید |
+| `engine-strict` خطا | نسخه‌ی Node | `.nvmrc` و nvm استفاده کنید |
+
+## ۱۲. آزمایش‌ها (با پاسخ)
+
+**۱.** `^0.3.1` چه نسخه‌هایی را اجازه می‌دهد؟
+
+**پاسخ:** `>=0.3.1 <0.4.0` — برای major صفر، minor ناسازگار تلقی می‌شود.
+
+**۲.** چرا `npm ci` در CI بهتر از `npm install` است؟
+
+**پاسخ:** دقیقاً lockfile را نصب می‌کند، آن را بازنویسی نمی‌کند و اگر ناسازگاری باشد سریع شکست می‌خورد؛ نتیجه قابل تکرار است.
+
+**۳.** بسته‌ای در `devDependencies` است ولی در کد production import می‌شود. چه اتفاقی می‌افتد؟
+
+**پاسخ:** با `npm ci --omit=dev` ماژول نصب نمی‌شود و برنامه در زمان اجرا crash می‌کند. باید به `dependencies` منتقل شود.
+
+**۴.** `npx cowsay hi` چه کاری می‌کند؟
+
+**پاسخ:** باینری بسته را (در صورت نبود) موقت دانلود و اجرا می‌کند؛ نیازی به نصب global نیست.
+
+## ۱۳. خودآزمایی
+
+1. تفاوت `^` و `~`؟
+2. نقش `exports` در بسته‌های مدرن؟
+3. چرا pnpm از phantom dependency جلوگیری می‌کند؟
+4. `peerDependencies` را چه زمانی استفاده می‌کنیم؟
+5. `prepare` چه زمانی اجرا می‌شود و چه خطری دارد؟
+6. چطور نسخه‌ی یک وابستگی غیرمستقیم را مجبور کنیم؟
+
+## ۱۴. چک‌لیست تحویل
+
+- [ ] `package.json` با `name/version/license/bin/engines/scripts`
+- [ ] تفکیک درست dependencies و devDependencies
+- [ ] lockfile در مخزن
+- [ ] CLI با shebang و مدیریت آرگومان/خطا + exit code
+- [ ] حداقل دو تست
+- [ ] README با نصب و اجرا
+- [ ] بدون راز یا فایل env در بسته

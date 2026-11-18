@@ -1,295 +1,386 @@
 # PostgreSQL و Prisma
 
-> مراجع: [PostgreSQL Tutorial](https://www.postgresql.org/docs/current/tutorial.html) · [Prisma Docs](https://www.prisma.io/docs)
+> مراجع: [PostgreSQL Tutorial](https://www.postgresql.org/docs/current/tutorial.html) · [Prisma Docs](https://www.prisma.io/docs) · [Use The Index, Luke](https://use-the-index-luke.com/)
 
-بیشتر اپلیکیشن‌های واقعی به یک پایگاه داده‌ی رابطه‌ای نیاز دارند. PostgreSQL قدرتمندترین گزینه‌ی متن‌باز است و Prisma کار با آن را تایپ‌امن می‌کند.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. راه‌اندازی سریع با Docker
+مدل رابطه‌ای را درست طراحی می‌کنید، کوئری و ایندکس می‌نویسید، تراکنش و ایزولیشن را می‌فهمید و با Prisma یک لایه‌ی داده‌ی تایپ‌سیف می‌سازید. در پایان، دیتابیس یک وبلاگ با نویسنده/پست/کامنت/تگ را می‌سازید و کوئری‌های سنگین را بهینه می‌کنید.
 
-```yaml
-# docker-compose.yml
-services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: devpassword
-      POSTGRES_DB: ticketing
-    ports: ['5432:5432']
-    volumes: ['pgdata:/var/lib/postgresql/data']
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U app -d ticketing']
-      interval: 5s
-      timeout: 3s
-      retries: 10
+---
 
-volumes:
-  pgdata:
-```
-
-```bash
-docker compose up -d
-psql postgresql://app:devpassword@localhost:5432/ticketing
-```
-
-## ۲. SQL پایه — لازم است بدانید
+## ۱. مدل رابطه‌ای
 
 ```sql
--- ساخت جدول
-CREATE TABLE events (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  title       text NOT NULL,
-  capacity    integer NOT NULL CHECK (capacity >= 0),
-  starts_at   timestamptz NOT NULL,
+CREATE TABLE authors (
+  id          bigserial PRIMARY KEY,
+  email       citext NOT NULL UNIQUE,
+  name        text NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX events_starts_at_idx ON events (starts_at);
+CREATE TABLE posts (
+  id          bigserial PRIMARY KEY,
+  author_id   bigint NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
+  title       text NOT NULL CHECK (length(title) BETWEEN 3 AND 200),
+  slug        text NOT NULL UNIQUE,
+  body        text NOT NULL,
+  published   boolean NOT NULL DEFAULT false,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
 
-CREATE TABLE tickets (
-  id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_id  uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  seat      text NOT NULL,
-  price     numeric(12,0) NOT NULL,
-  sold_at   timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (event_id, seat)
+CREATE TABLE comments (
+  id         bigserial PRIMARY KEY,
+  post_id    bigint NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  author_id  bigint REFERENCES authors(id) ON DELETE SET NULL,
+  body       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 ```
 
-```sql
--- پرس‌وجوهای روزمره
-SELECT e.title, count(t.id) AS sold
-FROM events e LEFT JOIN tickets t ON t.event_id = e.id
-GROUP BY e.id, e.title
-ORDER BY sold DESC;
+- **کلید اصلی** یکتاست و تغییر نمی‌کند؛ `bigserial`/`bigint identity`.
+- **کلید خارجی** یکپارچگی را در سطح دیتابیس تضمین می‌کند؛ `ON DELETE` را آگاهانه انتخاب کنید.
+- `timestamptz` برای زمان؛ `timestamp` بدون منطقه‌زمانی منبع باگ است.
+- `CHECK` قوانین ساده را در دیتابیس نگه می‌دارد.
 
+## ۲. کوئری: از ساده به تحلیلی
+
+```sql
+-- نویسندگان و تعداد پست‌های منتشرشده
+SELECT a.id, a.name, count(p.id) AS post_count
+FROM authors a
+LEFT JOIN posts p ON p.author_id = a.id AND p.published
+GROUP BY a.id, a.name
+ORDER BY post_count DESC
+LIMIT 10;
+```
+
+```sql
+-- آخرین کامنت هر پست با window function
+SELECT DISTINCT ON (c.post_id)
+  c.post_id, c.body, c.created_at
+FROM comments c
+ORDER BY c.post_id, c.created_at DESC;
+```
+
+```sql
+-- جستجوی متنی
+SELECT id, title
+FROM posts
+WHERE to_tsvector('simple', title || ' ' || body) @@ plainto_tsquery('simple', $1)
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+تفاوت‌های مهم:
+
+| کار | ابزار |
+| --- | --- |
+| شمارش/میانگین | `count`, `avg`, `sum` + `GROUP BY` |
+| رتبه‌بندی داخل گروه | `row_number() OVER (PARTITION BY ...)` |
+| اولین رکورد هر گروه | `DISTINCT ON` |
+| جستجوی متنی | `tsvector` + GIN index |
+
+## ۳. ایندکس: سریع، ولی رایگان نیست
+
+```sql
+CREATE INDEX posts_author_published_idx ON posts (author_id, published, created_at DESC);
+CREATE INDEX posts_search_idx ON posts USING GIN (to_tsvector('simple', title || ' ' || body));
+CREATE UNIQUE INDEX authors_email_lower_idx ON authors (lower(email));
+```
+
+- ایندکس، نوشتن را کند و فضا مصرف می‌کند؛ فقط برای کوئری‌های واقعی.
+- ترتیب ستون‌ها در ایندکس مرکب مهم است: ستون‌های برابری اول، سپس بازه/مرتب‌سازی.
+- `EXPLAIN (ANALYZE, BUFFERS)` ببینید از ایندکس استفاده می‌شود یا `Seq Scan`.
+- ایندکس روی ستون کم‌تنوع (مثل `boolean`) معمولاً بی‌فایده است؛ ایندکس جزئی بهتر است:
+
+```sql
+CREATE INDEX posts_unpublished_idx ON posts (created_at) WHERE NOT published;
+```
+
+## ۴. تراکنش و ایزولیشن
+
+```sql
 BEGIN;
-UPDATE events SET capacity = capacity - 2 WHERE id = $1 AND capacity >= 2;
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+UPDATE accounts SET balance = balance + 100 WHERE id = 2;
 COMMIT;
 ```
 
-اصول:
+- `BEGIN … COMMIT` یا `ROLLBACK`؛ در خطا حتماً rollback.
+- سطح پیش‌فرض `READ COMMITTED` است.
+- برای «خواندن، تصمیم، نوشتن» از `SELECT ... FOR UPDATE` استفاده کنید تا دو تراکنش هم‌زمان موجودی را دو بار کم نکنند.
+- `SERIALIZABLE` امن‌ترین است ولی نیاز به retry دارد.
 
-- مبالغ پولی را با `numeric` یا عدد صحیح (ریال) ذخیره کنید، نه `float`.
-- زمان‌ها را با `timestamptz` (نه `timestamp` بدون منطقه) ذخیره کنید.
-- `UNIQUE` و `CHECK` قوانین دامنه را در پایگاه داده تضمین می‌کنند، نه فقط در کد.
-
-## ۳. Prisma: نصب و Schema
-
-```bash
-npm i -D prisma && npm i @prisma/client
-npx prisma init --datasource-provider postgresql
+```sql
+BEGIN;
+SELECT balance FROM accounts WHERE id = 1 FOR UPDATE;
+-- بررسی کافی بودن موجودی
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+COMMIT;
 ```
+
+## ۵. Prisma: schema
 
 ```prisma
 // prisma/schema.prisma
-generator client {
-  provider = "prisma-client-js"
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+model Author {
+  id        BigInt    @id @default(autoincrement())
+  email     String    @unique
+  name      String
+  createdAt DateTime  @default(now()) @map("created_at")
+  posts     Post[]
+  comments  Comment[]
+
+  @@map("authors")
 }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-model User {
-  id      String  @id @default(uuid())
-  email   String  @unique
-  name    String
-  orders  Order[]
-  createdAt DateTime @default(now())
-}
-
-model Event {
-  id        String   @id @default(uuid())
+model Post {
+  id        BigInt    @id @default(autoincrement())
+  authorId  BigInt    @map("author_id")
+  author    Author    @relation(fields: [authorId], references: [id], onDelete: Cascade)
   title     String
-  capacity  Int
-  startsAt  DateTime
-  tickets   Ticket[]
-  orders    Order[]
+  slug      String    @unique
+  body      String
+  published Boolean   @default(false)
+  createdAt DateTime  @default(now()) @map("created_at")
+  comments  Comment[]
+  tags      Tag[]
 
-  @@index([startsAt])
+  @@index([authorId, published, createdAt(sort: Desc)])
+  @@map("posts")
 }
 
-model Order {
-  id        String   @id @default(uuid())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    String
-  event     Event    @relation(fields: [eventId], references: [id])
-  eventId   String
-  quantity  Int
-  total     Decimal  @db.Decimal(12, 0)
-  status    OrderStatus @default(PENDING)
-  createdAt DateTime @default(now())
+model Comment {
+  id        BigInt   @id @default(autoincrement())
+  postId    BigInt   @map("post_id")
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  BigInt?  @map("author_id")
+  author    Author?  @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
 
-  @@index([userId, createdAt])
+  @@index([postId, createdAt])
+  @@map("comments")
 }
 
-model Ticket {
-  id       String  @id @default(uuid())
-  event    Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  eventId  String
-  seat     String
-  price    Decimal @db.Decimal(12, 0)
+model Tag {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  posts Post[]
 
-  @@unique([eventId, seat])
-}
-
-enum OrderStatus {
-  PENDING
-  PAID
-  CANCELLED
+  @@map("tags")
 }
 ```
 
 ```bash
 npx prisma migrate dev --name init
 npx prisma generate
-npx prisma studio        # رابط گرافیکی برای دیدن داده
+npx prisma studio
 ```
 
-## ۴. کلاینت: پرس‌وجوهای تایپ‌امن
+## ۶. کوئری با Prisma
 
 ```ts
-// src/db.ts
-import { PrismaClient } from '@prisma/client'
-export const prisma = new PrismaClient()
+// فهرست با صفحه‌بندی و شمارش
+const [items, total] = await prisma.$transaction([
+  prisma.post.findMany({
+    where: { published: true, authorId },
+    select: {
+      id: true,
+      title: true,
+      slug: true,
+      createdAt: true,
+      author: { select: { name: true } },
+      _count: { select: { comments: true } }
+    },
+    orderBy: { createdAt: 'desc' },
+    skip: (page - 1) * limit,
+    take: limit
+  }),
+  prisma.post.count({ where: { published: true, authorId } })
+])
 ```
 
 ```ts
-const events = await prisma.event.findMany({
-  where: { startsAt: { gte: new Date() } },
-  orderBy: { startsAt: 'asc' },
-  take: 20,
-  include: { _count: { select: { tickets: true } } }
+// N+1: ❌ یک کوئری برای پست‌ها + n کوئری برای کامنت‌ها
+const posts = await prisma.post.findMany()
+for (const p of posts) await prisma.comment.findMany({ where: { postId: p.id } })
+
+// ✅ یک کوئری با include
+const withComments = await prisma.post.findMany({
+  include: { comments: { orderBy: { createdAt: 'desc' }, take: 3 } },
+  take: 20
 })
 ```
 
 ```ts
-const user = await prisma.user.upsert({
-  where: { email: 'sara@example.com' },
-  update: { name: 'سارا' },
-  create: { email: 'sara@example.com', name: 'سارا' }
+// ایجاد رابطه‌ی many-to-many با connectOrCreate
+await prisma.post.create({
+  data: {
+    title,
+    slug,
+    body,
+    authorId,
+    tags: {
+      connectOrCreate: tagNames.map((name) => ({
+        where: { name },
+        create: { name }
+      }))
+    }
+  }
 })
 ```
 
-## ۵. تراکنش: جلوگیری از فروش بیش از ظرفیت
-
-این سناریو کلاسیک است: دو کاربر هم‌زمان آخرین بلیت را می‌خرند.
-
 ```ts
-// ❌ Race condition: خواندن، سپس نوشتن
-const event = await prisma.event.findUniqueOrThrow({ where: { id } })
-if (event.capacity < qty) throw new Error('ظرفیت تکمیل است')
-await prisma.event.update({ where: { id }, data: { capacity: { decrement: qty } } })
+// تراکنش تعاملی
+await prisma.$transaction(async (tx) => {
+  const post = await tx.post.update({ where: { id }, data: { published: true } })
+  await tx.auditLog.create({ data: { action: 'publish', postId: post.id } })
+  return post
+})
 ```
 
 ```ts
-// ✅ کاهش شرطی اتمیک
-const [order] = await prisma.$transaction(async (tx) => {
+// خرید بلیت با کاهش اتمیک ظرفیت (بدون read-modify-write مسابقه‌ای)
+await prisma.$transaction(async (tx) => {
   const updated = await tx.event.updateMany({
-    where: { id, capacity: { gte: qty } },
-    data: { capacity: { decrement: qty } }
+    where: { id: eventId, remaining: { gt: 0 } },
+    data: { remaining: { decrement: 1 } }
   })
-
-  if (updated.count === 0) throw new Error('ظرفیت کافی نیست')
-
-  const created = await tx.order.create({
-    data: { userId, eventId: id, quantity: qty, total: price * qty }
-  })
-
-  await tx.ticket.createMany({
-    data: Array.from({ length: qty }, (_, i) => ({
-      eventId: id,
-      seat: `GA-${Date.now()}-${i}`,
-      price
-    }))
-  })
-
-  return [created]
+  if (updated.count === 0) throw new Error('ظرفیت تکمیل است')
+  return tx.ticket.create({ data: { eventId, userId } })
 })
-
-console.log(order)
 ```
 
-`updateMany` با شرط `capacity >= qty` توسط پایگاه داده به‌صورت اتمیک اجرا می‌شود. اگر `count === 0` باشد یعنی کسی جلوتر بوده است — تراکنش را rollback کنید.
+`updateMany` با شرط `remaining > 0` خودش اتمیک است؛ دو خرید هم‌زمان نمی‌توانند آخرین بلیت را دوبار بفروشند.
 
-## ۶. Seed
+**انتخاب فیلد:** `select` را دقیق بگذارید؛ `findMany()` بدون select همه‌ی ستون‌ها (و بدنه‌ی سنگین) را می‌آورد.
 
-```ts
-// prisma/seed.ts
-import { PrismaClient } from '@prisma/client'
-const prisma = new PrismaClient()
+## ۷. مهاجرت، seed و متغیر محیطی
 
-async function main() {
-  await prisma.event.createMany({
-    data: [
-      { title: 'کنسرت موسیقی', capacity: 200, startsAt: new Date('2030-05-01T18:00:00Z') },
-      { title: 'اجرای تئاتر', capacity: 80, startsAt: new Date('2030-06-12T19:30:00Z') }
-    ],
-    skipDuplicates: true
-  })
-}
-
-main()
-  .then(() => prisma.$disconnect())
-  .catch(async (e) => {
-    console.error(e)
-    await prisma.$disconnect()
-    process.exit(1)
-  })
-```
-
-```json
-{ "prisma": { "seed": "tsx prisma/seed.ts" } }
+```bash
+# .env.example (commit می‌شود؛ مقدار واقعی نه)
+DATABASE_URL="postgresql://user:password@localhost:5432/app?schema=public"
+printf '\n.env\n.env.local\n' >> .gitignore
 ```
 
 ```bash
+npx prisma migrate dev --name add_tags     # توسعه: ساخت + اعمال
+npx prisma migrate deploy                  # production: فقط اعمال
+npx prisma migrate status
 npx prisma db seed
 ```
 
-## ۷. مهاجرت‌ها در تیم
+```ts
+// prisma/seed.ts
+const author = await prisma.author.upsert({
+  where: { email: 'demo@example.com' },
+  update: {},
+  create: { email: 'demo@example.com', name: 'کاربر نمونه' }
+})
+```
 
-| دستور | کاربرد |
+- فایل‌های migration را **commit** کنید؛ هرگز در production از `db push` استفاده نکنید.
+- برای تست، دیتابیس جدا (Docker) و migration تازه؛ هر تست در تراکنش rollback شود.
+
+```yaml
+# docker-compose.yml
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: blog
+    ports: ['5432:5432']
+    volumes: ['pgdata:/var/lib/postgresql/data']
+volumes: { pgdata: {} }
+```
+
+## ۸. اتصال و کارایی
+
+- `DATABASE_URL` با `connection_limit` مناسب؛ هر request یک connection جدید نسازید.
+- در serverless، از pooler (مثل PgBouncer/Neon/Supabase pooler) استفاده کنید.
+- کوئری‌های کند را با `log: ['query']` یا `pg_stat_statements` پیدا کنید.
+- برای شمارش‌های بزرگ، `count` می‌تواند گران باشد؛ تقریب یا شمارنده‌ی کش‌شده.
+
+## ۹. ساخت گام‌به‌گام بلاگ (تمرین)
+
+**گام ۱ — Docker:** دیتابیس محلی بالا بیاورید و `DATABASE_URL` را تنظیم کنید.
+
+**گام ۲ — schema:** مدل‌های بخش ۵ با `@@index` لازم.
+
+**گام ۳ — migration:** `migrate dev --name init` و بررسی SQL تولیدشده.
+
+**گام ۴ — seed:** دو نویسنده، پنج پست، چند کامنت و تگ.
+
+**گام ۵ — کوئری‌ها:** فهرست منتشرشده با صفحه‌بندی، صفحه‌ی پست با کامنت و نویسنده، جستجو.
+
+**گام ۶ — بهینه‌سازی:** `EXPLAIN ANALYZE` روی کوئری فهرست؛ ایندکس مرکب بسازید و دوباره اندازه بگیرید.
+
+**گام ۷ — تراکنش:** انتشار پست + ثبت audit در یک تراکنش.
+
+**گام ۸ — تست:** یک تست برای ایجاد پست و یکی برای یکپارچگی حذف cascade.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
 | --- | --- |
-| `prisma migrate dev` | ساخت مهاجرت جدید در توسعه |
-| `prisma migrate deploy` | اعمال مهاجرت‌ها در staging/production |
-| `prisma migrate reset` | پاک کردن DB و اجرای مجدد (فقط توسعه!) |
-| `prisma db push` | همگام‌سازی سریع بدون فایل مهاجرت (پروتوتایپ) |
+| `schema` | بخش ۱ و ۵ |
+| `migrations` | بخش ۷ |
+| `transaction` | بخش ۴ و ۶ |
+| `seed` | بخش ۷ و گام ۴ |
+| `indexes` | بخش ۳ و ۵ |
+| `env` | بخش ۷ و ۸ |
 
-- پوشه‌ی `prisma/migrations` را **همیشه commit کنید**.
-- مهاجرت‌های اعمال‌شده را ویرایش نکنید؛ مهاجرت جدید بسازید.
-- برای تغییرات مخرب (حذف ستون) ابتدا داده را migrate کنید.
+## ۱۰. عیب‌یابی
 
-## ۸. ایندکس و کارایی
+| خطا | علت | راه‌حل |
+| --- | --- | --- |
+| `P2002` unique | تکراری | upsert یا بررسی قبل |
+| `P2003` foreign key | والد وجود ندارد | ترتیب ایجاد |
+| `P2025` record not found | update/delete روی id ناموجود | بررسی وجود |
+| کندی شدید | N+1 | include/select |
+| `too many connections` | pool | pooler/connection_limit |
+| migration drift | تغییر دستی schema | `migrate reset` در dev |
+| تاریخ اشتباه | `timestamp` بدون tz | `timestamptz` |
 
-- هر ستونی که در `WHERE`/`JOIN`/`ORDER BY` زیاد استفاده می‌شود کاندید ایندکس است.
-- `@@index([userId, createdAt])` برای «آخرین سفارش‌های کاربر» عالی است.
-- مشکل **N+1**: به‌جای حلقه و query تکی، از `include`/`select` استفاده کنید.
+## ۱۱. آزمایش‌ها (با پاسخ)
 
-```ts
-// ❌ N+1
-const orders = await prisma.order.findMany()
-for (const o of orders) await prisma.user.findUnique({ where: { id: o.userId } })
+**۱.** چرا `findMany()` بدون `select` می‌تواند خطرناک باشد؟
 
-// ✅ یک کوئری با join
-const orders = await prisma.order.findMany({ include: { user: true, event: true } })
-```
+**پاسخ:** همه‌ی ستون‌ها (مثل هش رمز یا بدنه‌ی بزرگ) را برمی‌گرداند؛ هم امنیت هم کارایی.
 
-## ۹. نکات امنیتی
+**۲.** تفاوت `include` و `select`؟
 
-- `DATABASE_URL` فقط در env؛ `prisma generate` را در build اجرا کنید.
-- کاربر پایگاه داده در production نباید superuser باشد.
-- از Prisma برای پارامترسازی استفاده کنید؛ با `$queryRaw` هرگز رشته‌ی کاربر را الحاق نکنید:
+**پاسخ:** include رابطه اضافه می‌کند؛ select دقیقاً فیلدهای خواسته‌شده را (و می‌تواند رابطه هم انتخاب کند).
 
-```ts
-// ❌ تزریق SQL
-await prisma.$queryRawUnsafe(`SELECT * FROM users WHERE email = '${email}'`)
+**۳.** چرا `FOR UPDATE` لازم است؟
 
-// ✅
-await prisma.$queryRaw`SELECT * FROM users WHERE email = ${email}`
-```
+**پاسخ:** جلوگیری از read-modify-write هم‌زمان و گم شدن به‌روزرسانی.
 
-## تمرین این درس
+**۴.** ایندکس مرکب `(author_id, published, created_at)` برای چه کوئری‌ای خوب است؟
 
-پایگاه داده‌ی فروش بلیت: مدل‌های User/Event/Order/Ticket با روابط، مهاجرت commit‌شده، خرید اتمیک بدون منفی شدن ظرفیت، seed، ایندکس و docker-compose. جزئیات در تب تمرین است.
+**پاسخ:** فیلتر نویسنده + وضعیت و مرتب‌سازی بر اساس تاریخ؛ ترتیب ستون‌ها مهم است.
+
+## ۱۲. خودآزمایی
+
+1. کلید خارجی چه چیزی را تضمین می‌کند؟
+2. `timestamptz` چه مشکلی را حل می‌کند؟
+3. `EXPLAIN ANALYZE` چه می‌گوید؟
+4. N+1 چیست و چطور رفع می‌شود؟
+5. تفاوت `migrate dev` و `migrate deploy`؟
+6. تراکنش تعاملی چه زمانی لازم است؟
+
+## ۱۳. چک‌لیست تحویل
+
+- [ ] schema با کلیدها، FK و ایندکس
+- [ ] migration کامیت‌شده
+- [ ] seed قابل اجرا
+- [ ] کوئری‌ها با select دقیق
+- [ ] بدون N+1
+- [ ] تراکنش برای عملیات چندمرحله‌ای
+- [ ] گزارش `EXPLAIN` قبل/بعد ایندکس
+- [ ] `.env` خارج از git

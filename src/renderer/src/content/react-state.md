@@ -1,27 +1,31 @@
 # مدیریت State: Context، Zustand و Redux
 
-> مراجع: [Context](https://react.dev/learn/passing-data-deeply-with-context) · [Zustand](https://zustand.docs.pmnd.rs/) · [Redux Toolkit](https://redux-toolkit.js.org/)
+> مراجع: [Context](https://react.dev/learn/passing-data-deeply-with-context) · [Zustand](https://zustand.docs.pmnd.rs/) · [Redux Toolkit](https://redux-toolkit.js.org/) · [TanStack Query](https://tanstack.com/query/latest)
 
-## ۱. مسئله: prop drilling
+## در این درس چه یاد می‌گیرید؟
 
-```
-App → Layout → Sidebar → UserMenu → Avatar (نیاز به user)
-```
+قبل از انتخاب ابزار، state را دسته‌بندی می‌کنید؛ بعد Context، useReducer، Zustand و Redux Toolkit را در جای درستشان به کار می‌برید. در پایان یک فروشگاه با تم سراسری، سبد خرید ماندگار، selector بهینه و توضیح مستند انتخاب ابزار دارید.
 
-وقتی داده از چند لایه عبور می‌کند فقط برای رسیدن به پایین، props را «کوله‌پشتی» کرده‌اید. سه راه‌حل داریم و **انتخاب درست به نوع state بستگی دارد**.
+---
 
-| نوع state | مثال | ابزار پیشنهادی |
+## ۱. اول دسته‌بندی، بعد ابزار
+
+| نوع state | مثال | ابزار |
 | --- | --- | --- |
-| محلی | باز/بسته بودن مودال | `useState` |
-| مشترک کم‌تغییر | تم، زبان، کاربر فعلی | **Context** |
-| مشترک پرتغییر و پیچیده | سبد خرید، ویرایشگر | **Zustand** |
-| دامنه‌ی بزرگ با تیم بزرگ | داشبورد سازمانی | **Redux Toolkit** |
+| محلی UI | باز بودن مودال، متن input | `useState` |
+| مشترک کم‌تغییر | تم، زبان، کاربر | **Context** |
+| مشترک پرتغییر | سبد خرید، ویرایشگر | **Zustand** |
+| دامنه‌ی بزرگ/تیمی | داشبورد سازمانی، لاگ اکشن | **Redux Toolkit** |
+| داده‌ی سرور | لیست محصولات، پروفایل | **React Query / RTK Query** |
+| state آدرس | فیلترها، صفحه | **URL / searchParams** |
 
-## ۲. Context API
+بیشتر اپ‌ها با `useState` + URL + یک کتابخانه‌ی داده‌ی سرور کار می‌کنند؛ store سراسری اغلب کمتر از حد تصور لازم است.
+
+## ۲. Context: درست و بدون افت کارایی
 
 ```tsx
 type Theme = 'light' | 'dark'
-type ThemeCtx = { theme: Theme; toggle: () => void; setTheme: (t: Theme) => void }
+interface ThemeCtx { theme: Theme; setTheme: (t: Theme) => void }
 
 const ThemeContext = createContext<ThemeCtx | null>(null)
 
@@ -29,7 +33,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem('theme')
     if (saved === 'light' || saved === 'dark') return saved
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   })
 
   useEffect(() => {
@@ -37,11 +41,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('theme', theme)
   }, [theme])
 
-  const value = useMemo(
-    () => ({ theme, toggle: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), setTheme }),
-    [theme]
-  )
-
+  const value = useMemo(() => ({ theme, setTheme }), [theme])
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }
 
@@ -52,48 +52,59 @@ export function useTheme() {
 }
 ```
 
-نکات مهم:
+**سه دام Context:**
 
-- **مقدار context را memo کنید**، وگرنه هر رندر Provider همه‌ی مصرف‌کننده‌ها را رندر می‌کند.
-- در Custom Hook خطای «خارج از Provider» را صریح پرتاب کنید.
-- Context را برای داده‌ی پرتغییر (مثل تایپ هر کلید در یک input) استفاده نکنید.
+1. **مقدار بدون memo** → هر رندر Provider همه‌ی مصرف‌کننده‌ها را رندر می‌کند.
+2. **Context پرتغییر** (مثلاً مقدار input) → کل درخت مصرف‌کننده رندر می‌شود؛ state را نزدیک مصرف‌کننده بگذارید.
+3. **یک Context غول** → هر تغییر، همه را بیدار می‌کند؛ Contextها را بشکنید (`ThemeContext`، `AuthContext`، `CartActionsContext`).
 
-## ۳. useReducer — وقتی منطق پیچیده است
+الگوی تقسیم: state و actionها را جدا کنید تا کامپوننت‌هایی که فقط action می‌خواهند با تغییر state رندر نشوند.
+
+## ۳. useReducer + Context: مقیاس‌پذیر بدون کتابخانه
 
 ```tsx
-type Action =
+type CartState = { items: CartItem[] }
+type CartAction =
   | { type: 'add'; item: CartItem }
   | { type: 'remove'; id: string }
   | { type: 'setQty'; id: string; qty: number }
   | { type: 'clear' }
 
-function reducer(state: CartItem[], action: Action): CartItem[] {
+function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
     case 'add': {
-      const existing = state.find((i) => i.id === action.item.id)
-      return existing
-        ? state.map((i) => (i.id === action.item.id ? { ...i, qty: i.qty + action.item.qty } : i))
-        : [...state, action.item]
+      const existing = state.items.find((i) => i.id === action.item.id)
+      return {
+        items: existing
+          ? state.items.map((i) => (i.id === action.item.id ? { ...i, qty: i.qty + action.item.qty } : i))
+          : [...state.items, action.item]
+      }
     }
-    case 'remove': return state.filter((i) => i.id !== action.id)
-    case 'setQty': return state.map((i) => (i.id === action.id ? { ...i, qty: Math.max(0, action.qty) } : i))
-    case 'clear': return []
-    default: return state
+    case 'remove':
+      return { items: state.items.filter((i) => i.id !== action.id) }
+    case 'setQty':
+      return {
+        items: state.items
+          .map((i) => (i.id === action.id ? { ...i, qty: Math.max(0, action.qty) } : i))
+          .filter((i) => i.qty > 0)
+      }
+    case 'clear':
+      return { items: [] }
+    default:
+      return state
   }
 }
 ```
 
-`useReducer` + Context الگوی قدرتمندی است: منطق تست‌پذیر (reducer یک تابع خالص است) و توزیع ساده.
+reducer خالص است → تست بدون React. اگر store را با `useReducer` و دو Context (state/actions) بسازید، یک Redux کوچک خانگی دارید.
 
-## ۴. Zustand — ساده و سریع
+## ۴. Zustand: store سراسری مینیمال
 
 ```ts
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-type CartItem = { id: string; title: string; price: number; qty: number }
-
-interface CartState {
+interface CartStore {
   items: CartItem[]
   add: (item: CartItem) => void
   remove: (id: string) => void
@@ -101,52 +112,56 @@ interface CartState {
   clear: () => void
 }
 
-export const useCart = create<CartState>()(
+export const useCart = create<CartStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       items: [],
-      add: (item) =>
-        set((s) => {
-          const found = s.items.find((i) => i.id === item.id)
-          return {
-            items: found
-              ? s.items.map((i) => (i.id === item.id ? { ...i, qty: i.qty + item.qty } : i))
-              : [...s.items, item]
-          }
-        }),
-      remove: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
+      add: (item) => {
+        const existing = get().items.find((i) => i.id === item.id)
+        set({
+          items: existing
+            ? get().items.map((i) => (i.id === item.id ? { ...i, qty: i.qty + item.qty } : i))
+            : [...get().items, item]
+        })
+      },
+      remove: (id) => set({ items: get().items.filter((i) => i.id !== id) }),
       setQty: (id, qty) =>
-        set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, qty } : i)) })),
+        set({ items: get().items.map((i) => (i.id === id ? { ...i, qty } : i)) }),
       clear: () => set({ items: [] })
     }),
-    { name: 'cart', version: 1 }
+    {
+      name: 'cart-v1',
+      version: 1,
+      migrate: (persisted, version) => {
+        // اگر شکل داده عوض شد، اینجا مهاجرت کنید
+        return persisted as CartStore
+      },
+      partialize: (s) => ({ items: s.items })
+    }
   )
 )
 ```
 
-استفاده با **selector** (بسیار مهم برای کارایی):
+**Selector؛ مهم‌ترین بخش Zustand:**
 
 ```tsx
-const count = useCart((s) => s.items.reduce((n, i) => n + i.qty, 0))
-const add = useCart((s) => s.add)   // توابع پایدارند، رندر اضافه نمی‌دهند
-```
-
-```tsx
-// ❌ کل store را می‌خواند → هر تغییری رندر می‌کند
+// ❌ کل store؛ هر تغییری رندر می‌کند
 const { items, add } = useCart()
 
-// ✅ فقط همان برش
-const items = useCart((s) => s.items)
-```
+// ✅ فقط برش لازم
+const count = useCart((s) => s.items.reduce((n, i) => n + i.qty, 0))
+const add = useCart((s) => s.add)   // تابع پایدار است
 
-برای انتخاب آبجکت مشتق‌شده از `useShallow` استفاده کنید تا مقایسه‌ی سطحی انجام شود:
-
-```ts
+// ✅ چند مقدار با مقایسه‌ی سطحی
 import { useShallow } from 'zustand/react/shallow'
-const { a, b } = useStore(useShallow((s) => ({ a: s.a, b: s.b })))
+const { items, clear } = useCart(useShallow((s) => ({ items: s.items, clear: s.clear })))
 ```
 
-## ۵. Redux Toolkit — استاندارد سازمانی
+> انتخاب آبجکت جدید بدون `useShallow` در هر رندر یک مرجع جدید می‌سازد و باعث رندر بی‌پایان می‌شود.
+
+store بیرون از React هم قابل استفاده است: `useCart.getState().items` در یک سرویس یا تست.
+
+## ۵. Redux Toolkit: استاندارد تیمی
 
 ```ts
 // store.ts
@@ -162,9 +177,12 @@ export type AppDispatch = typeof store.dispatch
 // cartSlice.ts
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit'
 
-const slice = createSlice({
+interface CartState { items: CartItem[] }
+const initialState: CartState = { items: [] }
+
+const cartSlice = createSlice({
   name: 'cart',
-  initialState: { items: [] as CartItem[] },
+  initialState,
   reducers: {
     add: (state, action: PayloadAction<CartItem>) => {
       const found = state.items.find((i) => i.id === action.payload.id)
@@ -177,48 +195,137 @@ const slice = createSlice({
   }
 })
 
-export const { add, remove } = slice.actions
-export default slice.reducer
+export const { add, remove } = cartSlice.actions
+export default cartSlice.reducer
 ```
 
-RTK از **Immer** استفاده می‌کند: mutate کردن `state` در reducer مجاز است و به‌روزرسانی immutable تولید می‌شود.
+RTK از Immer استفاده می‌کند؛ mutate کردن draft در reducer مجاز است و immer نسخه‌ی immutable می‌سازد.
 
 ```ts
 // hooks.ts
 import { useDispatch, useSelector } from 'react-redux'
 export const useAppDispatch = useDispatch.withTypes<AppDispatch>()
 export const useAppSelector = useSelector.withTypes<RootState>()
+
+// selectors.ts
+export const selectCount = (s: RootState) => s.cart.items.reduce((n, i) => n + i.qty, 0)
 ```
 
-با RTK Query برای داده‌ی سرور، کش و وضعیت درخواست را هم می‌گیرید:
+selectorها را بیرون کامپوننت تعریف کنید تا مرجع پایدار بمانند و با `Reselect` مشتق‌ها کش شوند.
+
+## ۶. داده‌ی سرور را داخل store کپی نکنید
 
 ```ts
-export const productsApi = createApi({
-  reducerPath: 'productsApi',
-  baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
-  endpoints: (b) => ({
-    products: b.query<Product[], void>({ query: () => '/products' })
-  })
+// ❌ دو منبع حقیقت: store و کش شبکه
+const [products, setProducts] = useState<Product[]>([])
+```
+
+با TanStack Query:
+
+```tsx
+const { data, isPending, isError, error } = useQuery({
+  queryKey: ['products'],
+  queryFn: fetchProducts,
+  staleTime: 60_000
 })
 ```
 
-## ۶. مقایسه‌ی صادقانه
+- کش، retry، refetch، حالت‌های loading/error و invalidate رایگان می‌شوند.
+- بعد از mutation: `queryClient.invalidateQueries({ queryKey: ['products'] })`.
+- store فقط برای state کلاینتی بماند (تم، سبد، draft).
 
-| معیار | Context | Zustand | Redux Toolkit |
+## ۷. نرمال‌سازی و state مشتق
+
+```ts
+// برای لیست‌های بزرگ و به‌روزرسانی‌های پرتکرار
+type State = {
+  byId: Record<string, Task>
+  allIds: string[]
+}
+```
+
+جمع، تعداد، فیلتر و مرتب‌سازی را ذخیره نکنید؛ در selector محاسبه کنید. اگر محاسبه سنگین شد، selector memo‌شده بسازید.
+
+## ۸. ساخت گام‌به‌گام فروشگاه (تمرین)
+
+**گام ۱ — منبع داده:** محصولات را از API بگیرید یا از JSON محلی بخوانید؛ تایپ `Product` و اعتبارسنجی سبک.
+
+**گام ۲ — تم با Context:** provider، hook با خطای خارج از provider، ذخیره در localStorage، اعمال `data-theme` روی `<html>`.
+
+**گام ۳ — سبد با Zustand:** store بالا + `persist`. selectorهای `useCartCount` و `useCartTotal`.
+
+**گام ۴ — کامپوننت‌ها:** `ProductGrid` (فقط محصولات)، `CartBadge` (فقط تعداد)، `CartDrawer` (آیتم‌ها)، `ThemeToggle` (فقط action). هر کدام دقیقاً همان برش لازم را بخوانند.
+
+**گام ۵ — ماندگاری:** رفرش کنید؛ سبد باید بماند. `version` بگذارید تا تغییر شکل داده‌ی آینده قابل مهاجرت باشد.
+
+**گام ۶ — حالت خالی و خطا:** سبد خالی، خطای شبکه، دکمه‌ی تلاش مجدد.
+
+**گام ۷ — مستند تصمیم:** در README بنویسید چرا تم Context شد، سبد Zustand، و داده‌ی محصولات کش سرور.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `context` | بخش ۲ |
+| `store` | بخش ۴ |
+| `selectors` | بخش ۴ و ۵ |
+| `persist` | بخش ۴ و گام ۵ |
+| `derived` | بخش ۷ و گام ۳ |
+
+## ۹. مقایسه‌ی صادقانه
+
+| معیار | Context | Zustand | RTK |
 | --- | --- | --- | --- |
-| حجم کد اولیه | کم | خیلی کم | متوسط |
-| کارایی با state پرتغییر | ضعیف | عالی | خوب |
-| DevTools و time-travel | ندارد | محدود | عالی |
+| کد اولیه | کم | خیلی کم | متوسط |
+| کارایی با تغییرات مکرر | ضعیف | عالی | خوب |
+| DevTools/time-travel | ❌ | محدود | ✅ |
 | تست reducer | سخت‌تر | آسان | آسان |
-| مناسبِ | تم/زبان | اکثر اپ‌ها | تیم بزرگ، لاگ اکشن |
+| مناسب برای | تم/زبان/کاربر | اکثر اپ‌ها | تیم بزرگ، لاگ اکشن |
 
-## ۷. قواعد ضد بوی بد
+## ۱۰. عیب‌یابی
 
-- Store را «زباله‌دان» نکنید؛ فقط state واقعاً مشترک.
-- داده‌ی سرور را در store دستی کپی نکنید؛ از کش ابزار (React Query/RTK Query) استفاده کنید.
-- state مشتق (جمع کل، تعداد) را ذخیره نکنید — محاسبه کنید.
-- برای هر store یک فایل و یک مرز دامنه.
+| نشانه | علت | راه‌حل |
+| --- | --- | --- |
+| Context همه را رندر می‌کند | value بدون memo / state پرتغییر | memo + شکستن Context |
+| Zustand رندر بی‌پایان | selector آبجکت جدید می‌سازد | `useShallow` |
+| سبد بعد از رفرش خالی است | persist پیکربندی نشده | middleware + `partialize` |
+| store بیرون از React کار نمی‌کند | در RTK نیاز به store import دارد | `store.getState()` یا `useCart.getState()` |
+| داده‌ی سرور قدیمی | کش/refetch | `staleTime`/invalidate |
+| reducer همیشه state جدید می‌سازد | mutation بدون Immer | کپی صریح برگردانید |
 
-## تمرین این درس
+## ۱۱. آزمایش‌ها (با پاسخ)
 
-فروشگاه کوچک: محصولات از API، تم تیره/روشن با Context، سبد خرید با Zustand + persist و selector، و توضیح انتخاب ابزار در README. جزئیات در تب تمرین است.
+**۱.** چرا `useContext` برای مقدار input مناسب نیست؟
+
+**پاسخ:** هر کاراکتر، Provider را دوباره رندر می‌کند و همه‌ی مصرف‌کننده‌ها را؛ input را محلی نگه دارید.
+
+**۲.** چه تفاوتی بین `useCart()` و `useCart(useShallow(...))`؟
+
+**پاسخ:** اولی کل store (یا آبجکت جدید در هر رندر) را برمی‌گرداند، دومی مقایسه‌ی سطحی می‌کند.
+
+**۳.** چرا state مشتق را ذخیره نمی‌کنیم؟
+
+**پاسخ:** ممکن است با منبع اصلی ناهماهنگ شود؛ محاسبه در رندر/selector همیشه درست است.
+
+**۴.** چه زمانی Redux را انتخاب می‌کنید؟
+
+**پاسخ:** دامنه‌ی بزرگ با چند تیم، نیاز به زمان‌سفر/لاگ، یا سیاست سازمانی — نه صرفاً «چون معروف است».
+
+## ۱۲. خودآزمایی
+
+1. پنج دسته state و ابزار هر کدام؟
+2. دو راه جلوگیری از رندر اضافی در Context؟
+3. selector در Zustand چه کاری می‌کند؟
+4. `persist` چطور نسخه‌بندی می‌شود؟
+5. Immer چه چیزی را ممکن می‌کند؟
+6. چرا داده‌ی سرور در store کپی نمی‌شود؟
+
+## ۱۳. چک‌لیست تحویل
+
+- [ ] Context با Provider و hook دارای خطا
+- [ ] store سبد با selector
+- [ ] ماندگاری سبد پس از رفرش
+- [ ] جمع/تعداد مشتق‌شده
+- [ ] حالت خالی/خطا
+- [ ] README با دلیل انتخاب ابزار
+- [ ] بدون رندر اضافی محسوس

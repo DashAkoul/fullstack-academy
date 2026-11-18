@@ -1,68 +1,84 @@
 # مبانی Node.js
 
-> مرجع رسمی: [Node.js Learn](https://nodejs.org/en/learn)
+> مرجع رسمی: [Node.js Learn](https://nodejs.org/en/learn) · [Event Loop](https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick) · [Streams](https://nodejs.org/api/stream.html)
 
-Node.js اجرای جاوااسکریپت خارج از مرورگر است: یک event loop تک‌رشته‌ای با I/O غیرهمگام. درک این مدل، تفاوت بین کد سریع و کد مسدودکننده را می‌سازد.
+## در این درس چه یاد می‌گیرید؟
 
-## ۱. Event Loop در یک نگاه
+یاد می‌گیرید کد Node چه زمانی کل سرور را قفل می‌کند، چرا Streamها برای فایل‌های بزرگ حیاتی‌اند، چطور خطاها و سیگنال‌ها را درست مدیریت کنید و یک ابزار واقعی خط فرمان بسازید که یک فایل لاگ چند گیگابایتی را بدون پر کردن حافظه تحلیل کند.
+
+---
+
+## ۱. Event Loop: چرا یک رشته کافی است؟
+
+Node یک thread برای اجرای جاوااسکریپت دارد و I/O را به سیستم‌عامل می‌سپارد. ترتیب تقریبی چرخه:
 
 ```
-   ┌───────────────────────────┐
-┌─>│           timers          │  setTimeout/setInterval
-│  ├───────────────────────────┤
-│  │     pending callbacks     │
-│  ├───────────────────────────┤
-│  │       poll (I/O)          │  ← بیشتر وقت اینجاست
-│  ├───────────────────────────┤
-│  │           check           │  setImmediate
-│  ├───────────────────────────┤
-│  │      close callbacks      │
-└──┤───────────────────────────┘
+timers → pending callbacks → poll (I/O) → check (setImmediate) → close callbacks
+                 ↕ microtasks (Promise, queueMicrotask) بین هر مرحله
 ```
-
-نتیجه‌ی عملی: کد CPU-heavy (حلقه‌ی بزرگ، JSON خیلی بزرگ، رمزنگاری سنگین) کل سرور را متوقف می‌کند. برای این کارها از `worker_threads` یا سرویس جدا استفاده کنید.
 
 ```js
-// ❌ سرور را برای همه قفل می‌کند
-const hash = crypto.pbkdf2Sync(password, salt, 100_000, 64, 'sha512')
+setTimeout(() => console.log('timeout'), 0)
+setImmediate(() => console.log('immediate'))
+Promise.resolve().then(() => console.log('promise'))
+process.nextTick(() => console.log('nextTick'))
+console.log('sync')
+
+// sync → nextTick → promise → timeout/immediate (ترتیب دو مورد آخر به context بستگی دارد)
+```
+
+`process.nextTick` و microtaskها **قبل از** ادامه‌ی چرخه اجرا می‌شوند؛ حلقه‌ی بی‌پایان `nextTick` کل I/O را گرسنه می‌کند.
+
+**نتیجه‌ی عملی:** عملیات CPU-سنگین را جدا کنید:
+
+```js
+// ❌ کل سرور برای همه قفل می‌شود
+const hash = crypto.pbkdf2Sync(password, salt, 210_000, 64, 'sha512')
 
 // ✅ نسخه‌ی غیرهمگام
-const hash = await promisify(crypto.pbkdf2)(password, salt, 100_000, 64, 'sha512')
+import { pbkdf2 } from 'node:crypto'
+import { promisify } from 'node:util'
+const pbkdf2Async = promisify(pbkdf2)
+const hash = await pbkdf2Async(password, salt, 210_000, 64, 'sha512')
 ```
 
-## ۲. ماژول‌های ESM
+برای کارهای واقعاً سنگین (پردازش تصویر، PDF، رمزنگاری انبوه) از `worker_threads` یا سرویس جدا استفاده کنید.
 
-```js
-// math.js
-export const add = (a, b) => a + b
-export default function multiply(a, b) { return a * b }
+## ۲. ماژول‌ها و ESM
 
-// app.js
-import multiply, { add } from './math.js'   // پسوند لازم است
+```json
+{ "type": "module" }
 ```
-
-در `package.json` مقدار `"type": "module"` را بگذارید. ماژول‌های داخلی را با پیشوند `node:` ایمپورت کنید تا با پکیج‌های npm اشتباه نشوند:
 
 ```js
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
 ```
 
-## ۳. فایل‌ها با `fs/promises`
+- پیشوند `node:` جلوگیری از اشتباه با پکیج npm است.
+- در ESM پسوند فایل در import لازم است.
+- `import.meta.url` جای `__dirname` را می‌گیرد.
+- top-level `await` فقط در ESM.
+
+## ۳. فایل‌ها: از کوچک تا بزرگ
 
 ```js
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { mkdir, writeFile, rename, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 export async function saveJson(dir, name, data) {
   await mkdir(dir, { recursive: true })
-  const file = path.join(dir, `${name}.json`)
-  await writeFile(file, JSON.stringify(data, null, 2), 'utf8')
-  return file
+  const target = path.join(dir, `${name}.json`)
+  const tmp = `${target}.${process.pid}.tmp`
+  await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
+  await rename(tmp, target)     // جایگزینی اتمیک
+  return target
 }
 
-export async function fileExists(p) {
+export async function exists(p) {
   try {
     await stat(p)
     return true
@@ -73,17 +89,19 @@ export async function fileExists(p) {
 }
 ```
 
-- `writeFile` اتمیک نیست؛ برای ایمنی، در فایل موقت بنویسید و بعد `rename` کنید.
-- مسیرها را همیشه با `path.join` بسازید، نه چسباندن رشته با `/`.
-- کد خطای `ENOENT` را مدیریت کنید؛ «فایل نیست» یک خطای قابل انتظار است.
+- `writeFile` مستقیم اتمیک نیست؛ نوشتن در tmp و rename از فایل نیمه‌نوشته جلوگیری می‌کند.
+- `path.join` برای سازگاری ویندوز/لینوکس.
+- خطای `ENOENT` یک وضعیت قابل انتظار است، نه فاجعه.
 
-## ۴. استریم‌ها: پردازش داده‌ی بزرگ
+## ۴. Stream و Backpressure
 
 ```js
-import { createReadStream } from 'node:fs'
+import { createReadStream, createWriteStream } from 'node:fs'
 import { createInterface } from 'node:readline'
+import { pipeline } from 'node:stream/promises'
+import { createGzip } from 'node:zlib'
 
-export async function processLines(file, onLine) {
+export async function forEachLine(file, onLine) {
   const rl = createInterface({
     input: createReadStream(file, { encoding: 'utf8' }),
     crlfDelay: Infinity
@@ -94,35 +112,30 @@ export async function processLines(file, onLine) {
   }
   return n
 }
-```
 
-مقایسه:
+await pipeline(createReadStream('access.log'), createGzip(), createWriteStream('access.log.gz'))
+```
 
 | روش | حافظه | مناسب |
 | --- | --- | --- |
-| `readFile` | کل فایل | فایل کوچک (< چند MB) |
-| `createReadStream` | بافر کوچک | فایل بزرگ / نامحدود |
-| `pipeline` | بافر کوچک + backpressure | انتقال/تبدیل داده |
+| `readFile` | کل فایل | فایل کوچک |
+| `createReadStream` | بافر کوچک | فایل بزرگ |
+| `pipeline` | بافر + backpressure | تبدیل/انتقال |
 
-```js
-import { pipeline } from 'node:stream/promises'
-import { createGzip } from 'node:zlib'
+`pipeline` خطاها را منتقل و streamها را در صورت شکست می‌بندد؛ از `readable.pipe(writable)` خام در production پرهیز کنید.
 
-await pipeline(createReadStream('big.log'), createGzip(), createWriteStream('big.log.gz'))
-```
-
-## ۵. EventEmitter — الگوی رویداد
+## ۵. EventEmitter: انتشار رویداد
 
 ```js
 import { EventEmitter } from 'node:events'
 
-export class LogAnalyzer extends EventEmitter {
-  #count = 0
+export class Analyzer extends EventEmitter {
+  #lines = 0
 
   async run(file) {
-    const total = await processLines(file, (line) => {
-      this.#count++
-      if (this.#count % 1000 === 0) this.emit('progress', this.#count)
+    const total = await forEachLine(file, (line) => {
+      this.#lines++
+      if (this.#lines % 1000 === 0) this.emit('progress', this.#lines)
       this.emit('line', line)
     })
     this.emit('done', total)
@@ -130,51 +143,41 @@ export class LogAnalyzer extends EventEmitter {
   }
 }
 
-const analyzer = new LogAnalyzer()
-analyzer.on('progress', (n) => console.log(`پردازش ${n} خط`))
-analyzer.on('line', (line) => { /* ... */ })
+const analyzer = new Analyzer()
+analyzer.on('progress', (n) => process.stderr.write(`\r${n} خط`))
+analyzer.on('error', (e) => console.error(e))
 await analyzer.run('./samples/access.log')
 ```
 
-نکته: اگر `error` را emit کنید و شنونده نداشته باشید، فرایند crash می‌کند. همیشه `on('error')` بگذارید.
+اگر رویداد `error` را emit کنید و شنونده نداشته باشید، فرایند crash می‌کند.
 
-## ۶. متغیرهای محیطی
+## ۶. پیکربندی و آرگومان‌ها
 
 ```js
-const port = Number(process.env.PORT ?? 3000)
-const logPath = process.argv[2] ?? process.env.LOG_PATH
+import { parseArgs } from 'node:util'
 
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    out: { type: 'string', short: 'o', default: 'report.json' },
+    top: { type: 'string', default: '10' }
+  }
+})
+
+const [logPath] = positionals
 if (!logPath) {
-  console.error('استفاده: node analyze.js <path-to-log>')
+  console.error('استفاده: node analyze.js <log> [-o report.json] [--top 10]')
   process.exitCode = 1
 }
 ```
 
-از Node 20.6 به بعد:
-
 ```bash
-node --env-file=.env app.js
+node --env-file=.env app.js        # Node 20.6+
 ```
 
-برای اعتبارسنجی قطعی env از Zod استفاده کنید (در درس Express بیشتر می‌بینیم).
+برای اعتبارسنجی env از Zod استفاده کنید و در شروع برنامه fail-fast کنید.
 
-## ۷. ابزارهای عملیاتی
-
-```bash
-node --watch app.js            # ری‌استارت خودکار در توسعه
-node --test                    # اجرای تست‌های داخلی
-node --inspect-brk app.js      # دیباگ با Chrome DevTools
-node -e "console.log(process.version)"
-```
-
-```js
-import { performance } from 'node:perf_hooks'
-const t0 = performance.now()
-// ...
-console.log(`${(performance.now() - t0).toFixed(1)}ms`)
-```
-
-## ۸. مدیریت خطای سطح فرایند
+## ۷. خطا و خاموشی تدریجی
 
 ```js
 process.on('unhandledRejection', (reason) => {
@@ -182,22 +185,125 @@ process.on('unhandledRejection', (reason) => {
   process.exitCode = 1
 })
 
-process.on('SIGTERM', async () => {
-  console.log('خاموشی تدریجی…')
-  await server.close()
-  process.exit(0)
+process.on('uncaughtException', (err) => {
+  console.error('خطای کشنده:', err)
+  process.exit(1)     // ادامه دادن با state نامعلوم خطرناک است
 })
+
+const server = app.listen(3000)
+
+async function shutdown(signal) {
+  console.log(`${signal}: خاموشی…`)
+  server.close(async () => {
+    await db.$disconnect()
+    process.exit(0)
+  })
+  setTimeout(() => process.exit(1), 10_000).unref()   // مهلت سخت
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
 ```
 
-یک سرور production باید بتواند «تدریجی» خاموش شود: اتصال جدید نپذیرد، درخواست‌های در جریان تمام شوند.
+## ۸. کارایی: اندازه بگیرید
 
-## ۹. کارایی: چند قاعده
+```js
+import { performance } from 'node:perf_hooks'
 
-- I/O را موازی کنید (`Promise.all`) نه سری.
-- از `JSON.parse` روی ورودی چند صد مگابایتی پرهیز کنید؛ استریم کنید.
-- `structuredClone` برای کپی عمیق، `Object.freeze` را برای قراردادهای داخلی در نظر بگیرید.
-- Cache را در جایی بگذارید که واقعاً گلوگاه است — ابتدا اندازه بگیرید.
+const t0 = performance.now()
+// ...
+console.log(`${(performance.now() - t0).toFixed(1)}ms`)
+```
 
-## تمرین این درس
+```bash
+node --cpu-prof analyze.js
+node --inspect-brk analyze.js
+```
 
-تحلیل‌گر لاگ: خواندن استریمی فایل لاگ بزرگ، آمار کدهای وضعیت/مسیرهای پرتکرار/توزیع ساعتی، خروجی JSON با `fs/promises`، گزارش پیشرفت با EventEmitter و مدیریت خطای ورودی. جزئیات در تب تمرین است.
+- I/O موازی: `Promise.all` نه حلقه‌ی `await` سری.
+- از buffering بی‌مورد پرهیز کنید؛ stream.
+- کش فقط بعد از اندازه‌گیری و در نقطه‌ی درست.
+
+## ۹. ساخت گام‌به‌گام تحلیل‌گر لاگ (تمرین)
+
+**گام ۱ — نمونه:** یک فایل `samples/access.log` با ۵۰ خط با فرمت Nginx بسازید.
+
+**گام ۲ — پارسر:**
+
+```js
+const LINE = /^(\S+) \S+ \S+ \[([^\]]+)\] "(\S+) ([^"]*)" (\d{3}) (\S+)$/
+
+export function parseLine(line) {
+  const m = LINE.exec(line)
+  if (!m) return null
+  return { ip: m[1], time: m[2], method: m[3], path: m[4], status: Number(m[5]) }
+}
+```
+
+**گام ۳ — تحلیل:** شمارش کد وضعیت، ۱۰ مسیر پرتکرار، توزیع ساعتی؛ با `Map`.
+
+**گام ۴ — stream:** `forEachLine` بخش ۴؛ گزارش پیشرفت با EventEmitter.
+
+**گام ۵ — خروجی:** `saveJson` اتمیک؛ خلاصه در کنسول.
+
+**گام ۶ — CLI:** `parseArgs`، مدیریت فایل ناموجود، `exitCode` درست.
+
+**گام ۷ — تست:** پارسر را با چند خط معتبر/نامعتبر تست کنید.
+
+### نگاشت به معیارهای پذیرش
+
+| معیار | کجای درس |
+| --- | --- |
+| `streams` | بخش ۴ و گام ۴ |
+| `fs-promises` | بخش ۳ و گام ۵ |
+| `events` | بخش ۵ |
+| `errors` | بخش ۷ و گام ۶ |
+| `esm` | بخش ۲ |
+
+## ۱۰. عیب‌یابی
+
+| نشانه | علت | راه‌حل |
+| --- | --- | --- |
+| `ERR_REQUIRE_ESM` | `require` در پروژه‌ی ESM | از `import` استفاده کنید |
+| `Cannot use import` | بدون `"type":"module"` | بخش ۲ |
+| حافظه پر می‌شود | `readFile`/جمع‌کردن در آرایه | stream |
+| سرور در بار سنگین کند | کار CPU در thread اصلی | worker/سرویس جدا |
+| فرایند با SIGTERM فوراً می‌میرد | بدون handler | بخش ۷ |
+| `ECONNREFUSED` | سرویس مقصد بالا نیست | retry/healthcheck |
+
+## ۱۱. آزمایش‌ها (با پاسخ)
+
+**۱.** چرا `await` در حلقه برای ۱۰ درخواست مستقل بد است؟
+
+**پاسخ:** سری اجرا می‌شود و مجموع زمان جمع می‌شود؛ `Promise.all` موازی است.
+
+**۲.** تفاوت `setImmediate` و `setTimeout(...,0)`؟
+
+**پاسخ:** setImmediate در مرحله‌ی check بعد از poll اجرا می‌شود؛ setTimeout در timers مرحله‌ی بعد (حداقل ~۱ms).
+
+**۳.** چرا `writeFile` مستقیم ممکن است فایل خراب بسازد؟
+
+**پاسخ:** کرش/قطع برق در میانه‌ی نوشتن؛ tmp + rename اتمیک.
+
+**۴.** چه زمانی worker thread لازم است؟
+
+**پاسخ:** کار CPU-bound طولانی که event loop را بلاک می‌کند.
+
+## ۱۲. خودآزمایی
+
+1. Event loop چه مراحلی دارد؟
+2. Stream چه مشکلی را حل می‌کند؟
+3. چرا `error` در EventEmitter حیاتی است؟
+4. تفاوت `uncaughtException` و `unhandledRejection`؟
+5. چطور خاموشی تدریجی را پیاده می‌کنید؟
+6. `--env-file` چه زمانی کافی است و چه زمانی Zod لازم است؟
+
+## ۱۳. چک‌لیست تحویل
+
+- [ ] پردازش stream بدون بارگذاری کامل
+- [ ] `fs/promises` و خطاهای ENOENT
+- [ ] EventEmitter برای پیشرفت
+- [ ] CLI با راهنما و exit code
+- [ ] فایل نمونه در samples
+- [ ] گزارش JSON اتمیک
+- [ ] تست پارسر
