@@ -1,13 +1,25 @@
 import type { Lesson, LessonMeta, Module } from './types'
 
-// Lesson bodies live in Markdown files (content/<lessonId>.md) so code samples stay readable.
-const bodies = import.meta.glob('../content/*.md', { query: '?raw', import: 'default', eager: true }) as Record<
-  string,
-  string
->
+// Lesson bodies live in Markdown files (content/<lessonId>.md). They are loaded
+// on demand so the initial renderer bundle stays small.
+const bodies = import.meta.glob('../content/*.md', {
+  query: '?raw',
+  import: 'default'
+}) as Record<string, () => Promise<string>>
 
-function body(id: string): string {
-  return bodies[`../content/${id}.md`] ?? `# ${id}\n\nمحتوای این درس هنوز اضافه نشده است.`
+const contentCache = new Map<string, Promise<string>>()
+
+export function loadLessonContent(id: string): Promise<string> {
+  const cached = contentCache.get(id)
+  if (cached) return cached
+  const loader = bodies[`../content/${id}.md`]
+  const promise = loader
+    ? loader()
+    : Promise.resolve(`# ${id}
+
+محتوای این درس هنوز اضافه نشده است.`)
+  contentCache.set(id, promise)
+  return promise
 }
 
 interface ModuleDef {
@@ -837,7 +849,7 @@ const MODULES: ModuleDef[] = [
 let counter = 0
 export const modules: Module[] = MODULES.map((m) => ({
   ...m,
-  lessons: m.lessons.map((l) => ({ ...l, moduleId: m.id, index: counter++, content: body(l.id) }))
+  lessons: m.lessons.map((l) => ({ ...l, moduleId: m.id, index: counter++ }))
 }))
 
 export const lessons: Lesson[] = modules.flatMap((m) => m.lessons)

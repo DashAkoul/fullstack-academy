@@ -241,7 +241,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 text-[var(--warning)]">
-              <TriangleAlert className="size-3" /> رمزنگاری سیستمی در دسترس نیست
+              <TriangleAlert className="size-3" /> Keychain در دسترس نیست؛ کلید فقط تا بستن برنامه در حافظه می‌ماند
             </span>
           )}
         </div>

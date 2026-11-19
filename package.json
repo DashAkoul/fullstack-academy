@@ -1,6 +1,6 @@
 {
   "name": "fullstack-academy",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "FullStack Academy — a Persian, offline-first desktop learning path from web basics to full-stack engineering with AI code review.",
   "main": "./out/main/index.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
+    "test:e2e": "npm run build && playwright test --config e2e/playwright.config.ts",
     "dist:win": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux"
@@ -21,6 +22,7 @@
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@fontsource/vazirmatn": "^5.3.0",
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.5",
     "@types/node": "^26.6.6",

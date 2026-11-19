@@ -9,7 +9,7 @@ import {
   Rocket,
   ShieldCheck
 } from 'lucide-react'
-import { lessonById, lessons, moduleById } from '@/data/curriculum'
+import { lessonById, lessons, loadLessonContent, moduleById } from '@/data/curriculum'
 import { isLessonUnlocked, useApp, useLessonProgress } from '@/store/useApp'
 import { Markdown } from './Markdown'
 import { ExerciseTab } from './ExerciseTab'
@@ -34,6 +34,24 @@ export function LessonView({ onOpenSettings }: { onOpenSettings: () => void }) {
   const lessonProgress = useLessonProgress(activeLessonId)
   const [tab, setTab] = useState<Tab>('lesson')
   const [seen, setSeen] = useState<Record<Tab, boolean>>({ lesson: true, exercise: false, review: false })
+  const [content, setContent] = useState<string | null>(null)
+  const [contentError, setContentError] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    setContent(null)
+    setContentError(false)
+    loadLessonContent(activeLessonId)
+      .then((text) => {
+        if (alive) setContent(text)
+      })
+      .catch(() => {
+        if (alive) setContentError(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [activeLessonId])
 
   useEffect(() => {
     setTab('lesson')
@@ -129,7 +147,17 @@ export function LessonView({ onOpenSettings }: { onOpenSettings: () => void }) {
       <div id="lesson-scroll" className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-6">
           <div className={tab === 'lesson' ? 'animate-in' : 'hidden'}>
-              <Markdown>{lesson.content}</Markdown>
+              {content ? (
+                <Markdown>{content}</Markdown>
+              ) : contentError ? (
+                <div className="surface-card p-6 text-sm text-[var(--danger)]">
+                  بارگذاری متن درس ناموفق بود. برنامه را دوباره باز کنید.
+                </div>
+              ) : (
+                <div className="flex justify-center py-16">
+                  <Spinner />
+                </div>
+              )}
 
               <div className="mt-8 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border-soft)] bg-[var(--surface-1)] px-4 py-3">
                 <div className="text-xs text-[var(--text-2)]">

@@ -11,7 +11,6 @@ const lesson: Lesson = {
   title: 'درس نمونه',
   summary: 'خلاصه',
   minutes: 10,
-  content: '# نمونه',
   docs: [],
   exercise: {
     title: 'تمرین نمونه',

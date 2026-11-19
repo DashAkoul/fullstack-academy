@@ -12,7 +12,7 @@ export const DEFAULT_MODELS: Record<AIProvider, string> = {
 
 export interface SecretsStatus {
   apiKeys: Record<AIProvider, boolean>
-  /** false when the OS keychain is unavailable and secrets are stored obfuscated only */
+  /** false when the OS keychain is unavailable: keys live in memory for this session only */
   encrypted: boolean
 }
 

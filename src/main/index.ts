@@ -162,7 +162,7 @@ function registerIpc(): void {
   handle('app:checkUpdate', () => checkForUpdate(APP_VERSION))
 }
 
-app.enableSandbox()
+if (!process.argv.includes('--no-sandbox')) app.enableSandbox()
 app.setName('FullStack Academy')
 
 const gotLock = app.requestSingleInstanceLock()

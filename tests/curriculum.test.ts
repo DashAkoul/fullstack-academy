@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lessons, modules } from '@/data/curriculum'
+import { lessons, loadLessonContent, modules } from '@/data/curriculum'
 import { isLessonUnlocked } from '@/store/useApp'
 import type { LessonProgress } from '@/store/useApp'
 
@@ -36,18 +36,19 @@ describe('کیفیت سرفصل', () => {
     expect(lessons).toHaveLength(21)
   })
 
-  it('هر درس محتوای واقعی، منابع رسمی و معیارهای پذیرش دارد', () => {
+  it('هر درس محتوای واقعی، منابع رسمی و معیارهای پذیرش دارد', async () => {
     for (const lesson of lessons) {
-      expect(lesson.content.length, lesson.id).toBeGreaterThan(1500)
+      const content = await loadLessonContent(lesson.id)
+      expect(content.length, lesson.id).toBeGreaterThan(1500)
       expect(lesson.docs.length, lesson.id).toBeGreaterThanOrEqual(2)
       expect(lesson.exercise.requirements.length, lesson.id).toBeGreaterThanOrEqual(5)
       expect(lesson.exercise.tasks.length, lesson.id).toBeGreaterThanOrEqual(3)
       expect(lesson.minutes, lesson.id).toBeGreaterThan(20)
       expect(lesson.exercise.repoName, lesson.id).toMatch(/^fsa-\d\d-[a-z0-9-]+$/)
-      expect(lesson.content, lesson.id).toContain('### اجرای واقعی')
-      expect(lesson.content, lesson.id).toContain('## در این درس چه یاد می‌گیرید؟')
+      expect(content, lesson.id).toContain('### اجرای واقعی')
+      expect(content, lesson.id).toContain('## در این درس چه یاد می‌گیرید؟')
       for (const requirement of lesson.exercise.requirements) {
-        expect(lesson.content, `${lesson.id}:${requirement.id}`).toContain(`\`${requirement.id}\``)
+        expect(content, `${lesson.id}:${requirement.id}`).toContain(`\`${requirement.id}\``)
       }
     }
   })

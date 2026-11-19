@@ -64,7 +64,7 @@ interface SecretsFile {
   apiKeys: Partial<Record<AIProvider, string>>
 }
 
-type StoredSecrets = { encrypted: boolean; payload: string }
+type StoredSecrets = { encrypted: true; payload: string }
 
 let cache: SecretsFile | null = null
 
@@ -81,11 +81,8 @@ async function canEncrypt(): Promise<boolean> {
 }
 
 async function encrypt(json: string): Promise<StoredSecrets> {
-  if (await canEncrypt()) {
-    const payload = await safeStorage.encryptStringAsync(json)
-    return { encrypted: true, payload: payload.toString('base64') }
-  }
-  return { encrypted: false, payload: Buffer.from(json, 'utf8').toString('base64') }
+  const payload = await safeStorage.encryptStringAsync(json)
+  return { encrypted: true, payload: payload.toString('base64') }
 }
 
 function validateSecrets(parsed: unknown): SecretsFile {
@@ -105,12 +102,16 @@ function validateSecrets(parsed: unknown): SecretsFile {
 async function loadSecrets(): Promise<SecretsFile> {
   if (cache) return cache
   try {
-    const raw = JSON.parse(await fs.readFile(secretsFile(), 'utf8')) as StoredSecrets
-    if (!raw || typeof raw.payload !== 'string' || typeof raw.encrypted !== 'boolean') {
-      throw new Error('ساختار فایل رازها نامعتبر است.')
+    const raw = JSON.parse(await fs.readFile(secretsFile(), 'utf8')) as Partial<StoredSecrets>
+    // Older versions could fall back to base64 (no real encryption). Never read
+    // that format again: delete it and ask the user for the key once.
+    if (!raw || raw.encrypted !== true || typeof raw.payload !== 'string') {
+      await fs.rm(secretsFile(), { force: true }).catch(() => {})
+      throw new Error('فایل رازها قابل استفاده نیست.')
     }
+    if (!(await canEncrypt())) throw new Error('Keychain در دسترس نیست.')
     const buf = Buffer.from(raw.payload, 'base64')
-    const json = raw.encrypted ? (await safeStorage.decryptStringAsync(buf)).result : buf.toString('utf8')
+    const json = (await safeStorage.decryptStringAsync(buf)).result
     cache = validateSecrets(JSON.parse(json))
   } catch {
     cache = { apiKeys: {} }
@@ -120,6 +121,18 @@ async function loadSecrets(): Promise<SecretsFile> {
 
 async function saveSecrets(s: SecretsFile): Promise<void> {
   cache = s
+  if (!(await canEncrypt())) {
+    // Memory-only mode: keep keys for this session, never write plaintext.
+    // Preserve an existing encrypted file (the keychain may be temporarily
+    // unavailable); only remove legacy base64/plaintext files.
+    try {
+      const raw = JSON.parse(await fs.readFile(secretsFile(), 'utf8')) as { encrypted?: boolean }
+      if (raw.encrypted !== true) await fs.rm(secretsFile(), { force: true })
+    } catch {
+      /* no file to clean up */
+    }
+    return
+  }
   const stored = await encrypt(JSON.stringify(s))
   await fs.mkdir(app.getPath('userData'), { recursive: true })
   await atomicWrite(secretsFile(), JSON.stringify(stored))

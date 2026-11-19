@@ -32,7 +32,6 @@ export interface Lesson extends LessonMeta {
   moduleId: string
   /** Global sequential index across the whole curriculum. */
   index: number
-  content: string
 }
 
 export interface Module {
