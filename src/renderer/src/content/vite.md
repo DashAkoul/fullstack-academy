@@ -247,6 +247,74 @@ export async function getCurrent(lat: number, lon: number): Promise<CurrentWeath
 
 **گام ۸ — build و بازبینی:** `npm run build && npm run preview`؛ حجم chunkها را ببینید و مطمئن شوید `forecast` جدا شده است.
 
+### اجرای واقعی: dev، build و preview
+
+```bash
+npm create vite@latest weather -- --template vanilla-ts
+cd weather && npm install
+npm run dev
+#   VITE v8.3.8  ready in 229 ms
+#
+#   ➜  Local:   http://localhost:5173/
+#   ➜  Network: use --host to expose
+```
+
+مرورگر را باز کنید؛ باید عنوان صفحه و فرم جستجو را ببینید. در Console:
+
+```js
+import.meta.env.MODE   // "development"
+import.meta.env.DEV    // true
+```
+
+**build واقعی:**
+
+```bash
+npm run build
+# vite v8.3.8 building for production...
+# transforming...
+# ✓ 4 modules transformed.
+# rendering chunks...
+# computing gzip size...
+# dist/index.html                0.13 kB │ gzip: 0.13 kB
+# dist/assets/index-Ov8xHj7U.js  0.82 kB │ gzip: 0.47 kB
+# ✓ built in 72ms
+```
+
+عدد و هش فایل‌ها با کد شما فرق می‌کند؛ ساختار مهم است.
+
+**preview:**
+
+```bash
+npm run preview
+# ➜  Local: http://localhost:4173/
+curl -s http://localhost:4173/ | head -3
+# <!doctype html>
+# <html lang="en">
+# ...
+```
+
+**ایست بازرسی ۱:** در `dist/index.html` مسیر اسکریپت باید با `./assets/` شروع شود (چون `base: './'`). اگر `/assets/` دیدید، `base` را تنظیم نکرده‌اید.
+
+**ایست بازرسی ۲:** `dist/` نباید `src/` یا `.env` داشته باشد. اگر دارد، `public/` یا تنظیمات را بررسی کنید.
+
+**ایست بازرسی ۳:** chunk تنبل:
+
+```bash
+ls dist/assets | sort
+# Forecast-xxxx.js
+# index-xxxx.js
+```
+
+اگر `Forecast` جدا نشد، `import()` را به‌جای import استاتیک استفاده نکرده‌اید.
+
+**خطای رایج واقعی:**
+
+```text
+Failed to resolve import "@/api" from "src/main.ts".
+```
+
+یعنی alias در `vite.config.ts` هست ولی `paths` در `tsconfig` نیست (یا برعکس). هر دو باید هم‌راستا باشند.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

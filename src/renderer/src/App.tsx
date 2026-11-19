@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { GraduationCap, KeyRound, Moon, Settings2, Sparkles, Sun } from 'lucide-react'
 import { useApp } from '@/store/useApp'
 import { useSecrets } from '@/store/useSecrets'
 import { Sidebar } from '@/components/Sidebar'
 import { LessonView } from '@/components/LessonView'
-import { SettingsDialog } from '@/components/SettingsDialog'
 import { Spinner } from '@/components/ui'
+
+const SettingsDialog = lazy(() =>
+  import('@/components/SettingsDialog').then((m) => ({ default: m.SettingsDialog }))
+)
 
 function TopBar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const settings = useApp((s) => s.settings)
@@ -90,7 +93,11 @@ export default function App() {
           <LessonView onOpenSettings={() => setSettingsOpen(true)} />
         </div>
       </main>
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog open onClose={() => setSettingsOpen(false)} />
+        </Suspense>
+      )}
     </div>
   )
 }

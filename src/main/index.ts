@@ -1,6 +1,18 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, nativeTheme, type MenuItemConstructorOptions } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  session,
+  shell,
+  nativeTheme,
+  type IpcMainInvokeEvent,
+  type MenuItemConstructorOptions
+} from 'electron'
 import { join } from 'node:path'
 import type { AIProvider, IpcResult } from '@shared/types'
+import { AI_PROVIDERS } from '@shared/types'
+import { isSafeExternalUrl } from '@shared/netSafety'
 import * as storage from './storage'
 import * as github from './github'
 import * as ai from './ai'
@@ -9,13 +21,31 @@ import { checkForUpdate } from './update'
 declare const __APP_VERSION__: string
 const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? __APP_VERSION__ : app.getVersion()
 
-function isSafeExternal(url: string): boolean {
+const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write'])
+const MAX_STORAGE_VALUE = 5_000_000
+
+function isAppUrl(raw: string): boolean {
   try {
-    const u = new URL(url)
-    return u.protocol === 'https:' || u.protocol === 'http:'
+    const url = new URL(raw)
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (!app.isPackaged && devUrl) return url.origin === new URL(devUrl).origin
+    return url.protocol === 'file:' && url.pathname.endsWith('/out/renderer/index.html')
   } catch {
     return false
   }
+}
+
+/** Only the app's own top-level document may call privileged IPC. */
+function isTrustedSender(event: IpcMainInvokeEvent): boolean {
+  const frameUrl = event.senderFrame?.url
+  if (!frameUrl) return false
+  return isAppUrl(frameUrl)
+}
+
+function requireString(value: unknown, name: string, maxLength: number): string {
+  if (typeof value !== 'string') throw new Error(`${name} باید متن باشد.`)
+  if (value.length > maxLength) throw new Error(`${name} بیش از حد طولانی است.`)
+  return value
 }
 
 function createWindow(): void {
@@ -32,7 +62,12 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      webviewTag: false,
+      spellcheck: false,
+      devTools: !app.isPackaged
     }
   })
 
@@ -40,15 +75,18 @@ function createWindow(): void {
 
   // All links open in the user's browser, never inside the app window.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isSafeExternal(url)) void shell.openExternal(url)
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  win.webContents.on('will-navigate', (e, url) => {
-    const devUrl = process.env['ELECTRON_RENDERER_URL']
-    if (devUrl && url.startsWith(devUrl)) return
-    e.preventDefault()
-    if (isSafeExternal(url)) void shell.openExternal(url)
-  })
+
+  const blockForeignNavigation = (event: Electron.Event, url: string): void => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+    if (isSafeExternalUrl(url)) void shell.openExternal(url)
+  }
+  win.webContents.on('will-navigate', blockForeignNavigation)
+  win.webContents.on('will-redirect', blockForeignNavigation)
+  win.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -59,7 +97,10 @@ function createWindow(): void {
 
 /** Wraps handlers so errors cross the IPC boundary as clean messages. */
 function handle<A extends unknown[], R>(channel: string, fn: (...args: A) => Promise<R> | R): void {
-  ipcMain.handle(channel, async (_e, ...args: unknown[]): Promise<IpcResult<R>> => {
+  ipcMain.handle(channel, async (event, ...args: unknown[]): Promise<IpcResult<R>> => {
+    if (!isTrustedSender(event)) {
+      return { ok: false, error: 'درخواست از منبع نامعتبر رد شد.' }
+    }
     try {
       return { ok: true, data: await fn(...(args as A)) }
     } catch (err) {
@@ -87,23 +128,31 @@ function buildMenu(): void {
 }
 
 function registerIpc(): void {
-  handle('storage:read', (key: string) => storage.readDoc(key))
-  handle('storage:write', (key: string, value: string) => storage.writeDoc(key, value))
-  handle('storage:remove', (key: string) => storage.removeDoc(key))
+  handle('storage:read', (key: unknown) => storage.readDoc(requireString(key, 'کلید', 64)))
+  handle('storage:write', (key: unknown, value: unknown) =>
+    storage.writeDoc(requireString(key, 'کلید', 64), requireString(value, 'مقدار', MAX_STORAGE_VALUE))
+  )
+  handle('storage:remove', (key: unknown) => storage.removeDoc(requireString(key, 'کلید', 64)))
 
   handle('secrets:status', () => storage.secretsStatus())
-  handle('secrets:setApiKey', async (provider: AIProvider, key: string | null) => {
-    await storage.setApiKey(provider, key)
+  handle('secrets:setApiKey', async (provider: unknown, key: unknown) => {
+    if (typeof provider !== 'string' || !(AI_PROVIDERS as string[]).includes(provider)) {
+      throw new Error('سرویس ناشناخته')
+    }
+    if (key !== null && typeof key !== 'string') throw new Error('کلید API نامعتبر است.')
+    await storage.setApiKey(provider as AIProvider, key as string | null)
     return storage.secretsStatus()
   })
-  handle('github:fetchRepo', (ref: string) => github.fetchRepo(ref))
 
-  handle('ai:complete', (req: Parameters<typeof ai.complete>[0]) => ai.complete(req))
-  handle('ai:listModels', (req: Parameters<typeof ai.listModels>[0]) => ai.listModels(req))
+  handle('github:fetchRepo', (ref: unknown) => github.fetchRepo(requireString(ref, 'آدرس مخزن', 500)))
 
-  handle('shell:openExternal', async (url: string) => {
-    if (!isSafeExternal(url)) throw new Error('Blocked URL')
-    await shell.openExternal(url)
+  handle('ai:complete', (req: unknown) => ai.complete(req))
+  handle('ai:listModels', (req: unknown) => ai.listModels(req))
+
+  handle('shell:openExternal', async (url: unknown) => {
+    const value = requireString(url, 'آدرس', 2048)
+    if (!isSafeExternalUrl(value)) throw new Error('آدرس نامعتبر است.')
+    await shell.openExternal(value)
   })
   handle('app:info', () => ({
     version: APP_VERSION,
@@ -113,6 +162,7 @@ function registerIpc(): void {
   handle('app:checkUpdate', () => checkForUpdate(APP_VERSION))
 }
 
+app.enableSandbox()
 app.setName('FullStack Academy')
 
 const gotLock = app.requestSingleInstanceLock()
@@ -131,6 +181,14 @@ if (!gotLock) {
 app.whenReady().then(() => {
   if (!gotLock) return
   app.setAppUserModelId('com.fullstackacademy.desktop')
+
+  const ses = session.defaultSession
+  ses.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(ALLOWED_PERMISSIONS.has(permission))
+  })
+  ses.setPermissionCheckHandler((_wc, permission) => ALLOWED_PERMISSIONS.has(permission))
+  ses.setSpellCheckerEnabled(false)
+
   buildMenu()
   registerIpc()
   createWindow()

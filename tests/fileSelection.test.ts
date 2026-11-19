@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isReviewable, selectReviewFiles } from '@shared/fileSelection'
+import { isReviewable, looksLikeSecret, selectReviewFiles } from '@shared/fileSelection'
 
 describe('isReviewable', () => {
   it('فایل‌های سورس و پیکربندی را می‌پذیرد', () => {
@@ -53,5 +53,22 @@ describe('selectReviewFiles', () => {
 
   it('سقف تعداد فایل را اعمال می‌کند', () => {
     expect(selectReviewFiles(files, { maxFiles: 2 })).toHaveLength(2)
+  })
+})
+
+describe('جلوگیری از نشت راز', () => {
+  it('.npmrc و .env واقعی ارسال نمی‌شوند', () => {
+    expect(isReviewable('.npmrc')).toBe(false)
+    expect(isReviewable('.env')).toBe(false)
+    expect(isReviewable('.env.local')).toBe(false)
+    expect(isReviewable('.env.example')).toBe(true)
+  })
+
+  it('محتوای حاوی کلید خصوصی یا توکن را تشخیص می‌دهد', () => {
+    expect(looksLikeSecret('-----BEGIN RSA PRIVATE KEY-----\nabc')).toBe(true)
+    expect(looksLikeSecret('const key = "sk-abcdefghijklmnopqrstuvwxyz123456"')).toBe(true)
+    expect(looksLikeSecret('const key = "ghp_abcdefghijklmnopqrstuvwxyz1234"')).toBe(true)
+    expect(looksLikeSecret('AKIAIOSFODNN7EXAMPLE')).toBe(true)
+    expect(looksLikeSecret('const title = "hello world"')).toBe(false)
   })
 })

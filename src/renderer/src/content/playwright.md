@@ -308,6 +308,91 @@ npx playwright test --shard=1/4
 
 **گام ۹ — CI:** اجرا با retries و آپلود trace در شکست.
 
+### اجرای واقعی: اجرا، شکست و Trace
+
+```bash
+npx playwright test
+# Running 3 tests using 3 workers
+#
+#   ✓  1 e2e/checkout.spec.ts:10:7 › خرید › کاربر می‌تواند سفارش را ثبت کند (2.1s)
+#   ✓  2 e2e/checkout.spec.ts:22:7 › خرید › خطای اعتبارسنجی نمایش داده می‌شود (1.4s)
+#   ○  3 e2e/checkout.spec.ts:31:7 › خرید › موبایل (skipped)
+#
+#   2 passed, 1 skipped (6.2s)
+```
+
+**یک locator اشتباه:**
+
+```bash
+npx playwright test --grep "سفارش"
+```
+
+```text
+Error: strict mode violation: getByRole('button', { name: 'ثبت سفارش' }) resolved to 2 elements:
+    1) <button>ثبت سفارش</button>
+    2) <button>ثبت سفارش و پرداخت</button>
+```
+
+یعنی locator مبهم است. آن را دقیق کنید:
+
+```ts
+page.getByRole('button', { name: 'ثبت سفارش', exact: true })
+```
+
+**شکست واقعی با انتظار:**
+
+```text
+Error: expect(locator).toHaveText(expected)
+
+Locator: getByTestId('total')
+Expected string: "۲۵۰٬۰۰۰ تومان"
+Received string: "250000 تومان"
+Timeout: 5000ms
+```
+
+پیام دقیقاً تفاوت قالب‌بندی را نشان می‌دهد؛ این تست درست شکست خورده است.
+
+**Trace:**
+
+```bash
+npx playwright show-trace test-results/checkout-.../trace.zip
+# ════════════════════════════════════════════
+#  Trace Viewer opened in browser
+```
+
+در Trace، تب‌های **Actions**، **Network**، **Console** و **Source** را ببینید؛ معمولاً علت در snapshot همان لحظه است.
+
+**ایست بازرسی ۱ — بدون sleep:** در کل تست‌ها جستجو کنید:
+
+```bash
+grep -R "waitForTimeout" e2e || echo "clean"
+# clean
+```
+
+**ایست بازرسی ۲ — auth:** فایل `e2e/.auth/user.json` نباید در git باشد:
+
+```bash
+git check-ignore -v e2e/.auth/user.json
+# .gitignore:12:e2e/.auth/    e2e/.auth/user.json
+```
+
+**ایست بازرسی ۳ — CI:** در GitHub Actions لاگ را ببینید:
+
+```text
+Run npx playwright test
+  2 passed (18.4s)
+Upload artifact playwright-report
+```
+
+اگر job با `browser not found` شکست خورد، `npx playwright install --with-deps chromium` را در workflow گذاشته‌اید؟
+
+| خطا | معنا | اصلاح |
+| --- | --- | --- |
+| `strict mode violation` | locator چندتایی | `exact`/`filter`/`nth` |
+| `Target closed` | صفحه بسته شد | بررسی popup/تب |
+| `Timeout 30000ms exceeded` | انتظار بی‌پایان | locator/شرط را بررسی کنید |
+| `Executable doesn't exist` | مرورگر نصب نیست | `playwright install` |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

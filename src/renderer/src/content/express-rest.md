@@ -391,6 +391,63 @@ paths:
         '400': { description: ورودی نامعتبر }
 ```
 
+### اجرای واقعی: درخواست‌ها با curl
+
+```bash
+npm run dev
+# server listening on http://localhost:3000
+```
+
+```bash
+curl -i http://localhost:3000/health
+# HTTP/1.1 200 OK
+# Content-Type: application/json; charset=utf-8
+# {"ok":true}
+```
+
+```bash
+curl -i -X POST http://localhost:3000/api/v1/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"نوشتن تست"}'
+# HTTP/1.1 201 Created
+# Location: /api/v1/tasks/1
+# {"data":{"id":"1","title":"نوشتن تست","status":"open"}}
+```
+
+```bash
+curl -i -X POST http://localhost:3000/api/v1/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"a"}'
+# HTTP/1.1 400 Bad Request
+# {"error":{"code":"VALIDATION_ERROR","message":"ورودی نامعتبر است.","details":[{"path":"title","message":"Too small: expected string to have >=2 characters"}]}}
+```
+
+```bash
+curl -i http://localhost:3000/api/v1/tasks
+# HTTP/1.1 401 Unauthorized
+# {"error":{"code":"UNAUTHORIZED","message":"توکن لازم است."}}
+```
+
+```bash
+curl -s "http://localhost:3000/api/v1/tasks?page=2&limit=2" \
+  -H "Authorization: Bearer $TOKEN"
+# {"data":[...],"meta":{"page":2,"limit":2,"total":5,"pages":3}}
+```
+
+**ایست بازرسی ۱ — ترتیب middleware:** اگر بدنه را می‌فرستید و `req.body` خالی است، `express.json()` بعد از مسیرها ثبت شده. ترتیب باید body → routes → notFound → errorHandler باشد.
+
+**ایست بازرسی ۲ — خطای async:** یک `throw new Error('boom')` در سرویس بگذارید؛ در Express 5 باید برسد به error handler و کلاینت ببیند:
+
+```json
+{"error":{"code":"INTERNAL","message":"خطای سرور.","requestId":"..."}}
+```
+
+اگر فرایند crash کرد، خطا را در callback هندل نکرده‌اید (Express 4).
+
+**ایست بازرسی ۳ — مالکیت:** با توکن کاربر دوم، `GET /api/v1/tasks/1` (مال کاربر اول) باید `404` بدهد، نه `403` (منبع را پنهان می‌کنیم). اگر `200` داد، فیلتر `userId` جا افتاده است.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

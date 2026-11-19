@@ -44,6 +44,11 @@ describe('کیفیت سرفصل', () => {
       expect(lesson.exercise.tasks.length, lesson.id).toBeGreaterThanOrEqual(3)
       expect(lesson.minutes, lesson.id).toBeGreaterThan(20)
       expect(lesson.exercise.repoName, lesson.id).toMatch(/^fsa-\d\d-[a-z0-9-]+$/)
+      expect(lesson.content, lesson.id).toContain('### اجرای واقعی')
+      expect(lesson.content, lesson.id).toContain('## در این درس چه یاد می‌گیرید؟')
+      for (const requirement of lesson.exercise.requirements) {
+        expect(lesson.content, `${lesson.id}:${requirement.id}`).toContain(`\`${requirement.id}\``)
+      }
     }
   })
 

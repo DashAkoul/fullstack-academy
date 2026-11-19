@@ -262,6 +262,60 @@ type State = {
 
 **گام ۷ — مستند تصمیم:** در README بنویسید چرا تم Context شد، سبد Zustand، و داده‌ی محصولات کش سرور.
 
+### اجرای واقعی: store، selector و ماندگاری
+
+```bash
+npm create vite@latest fsa-08-store -- --template react-ts
+cd fsa-08-store && npm i zustand && npm run dev
+#   VITE v8.3.8  ready in 220 ms
+#   ➜  Local:   http://localhost:5173/
+```
+
+**ایست بازرسی ۱ — تعداد رندر:** موقتاً یک `console.count('CartBadge')` در کامپوننت badge و یکی در `ProductGrid` بگذارید. با افزودن یک محصول:
+
+- `CartBadge` باید رندر شود (تعداد عوض شده).
+- اگر `ProductGrid` هم با هر تغییر سبد رندر می‌شود و محصولات تغییر نکرده‌اند، احتمالاً کل store را می‌خوانید:
+
+```tsx
+// ❌ هر تغییری رندر می‌کند
+const store = useCart()
+
+// ✅ فقط تعداد
+const count = useCart((s) => s.items.reduce((n, i) => n + i.qty, 0))
+```
+
+**ایست بازرسی ۲ — persist:** سبد را پر کنید و در Console:
+
+```js
+JSON.parse(localStorage.getItem('cart-v1')).state.items.length
+// 2
+```
+
+بعد از `F5` مقدار باید همان بماند. اگر `null` است، `persist` را دور store نگذاشته‌اید یا `partialize` فیلد را حذف کرده است.
+
+**ایست بازرسی ۳ — مهاجرت:** `version` را در persist `2` کنید و یک فیلد جدید اضافه کنید؛ اگر `migrate` ننویسید، داده‌ی قدیمی ممکن است شکل اشتباه داشته باشد. خروجی هشدار:
+
+```text
+State loaded from storage couldn't be migrated since no migrate function was provided
+```
+
+**ایست بازرسی ۴ — Context:** روی دکمه‌ی تم بزنید؛ در Elements باید ببینید:
+
+```html
+<html lang="fa" dir="rtl" data-theme="light">
+```
+
+اگر تغییر نکرد، `document.documentElement.dataset.theme` را در useEffect ست نکرده‌اید.
+
+**تست selector بدون React:**
+
+```ts
+const total = useCart.getState().items.reduce((n, i) => n + i.qty, 0)
+console.log(total)
+```
+
+`getState()` برای تست و کد غیر React است؛ در کامپوننت از selector استفاده کنید.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

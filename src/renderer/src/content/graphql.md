@@ -326,6 +326,74 @@ Codegen از schema + operationها تایپ تولید می‌کند؛ دیگر
 
 **گام ۸ — Codegen:** operation نمونه و تایپ تولیدشده در کلاینت.
 
+### اجرای واقعی: کوئری و Mutation
+
+```bash
+npm run dev
+# GraphQL Yoga running at http://localhost:4000/graphql
+```
+
+```bash
+curl -s http://localhost:4000/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"{ posts(first: 2) { edges { node { id title author { name } } } pageInfo { hasNextPage endCursor } totalCount } }"}'
+```
+
+```json
+{
+  "data": {
+    "posts": {
+      "edges": [
+        { "node": { "id": "1", "title": "اولین پست", "author": { "name": "سارا" } } },
+        { "node": { "id": "2", "title": "دومین پست", "author": { "name": "علی" } } }
+      ],
+      "pageInfo": { "hasNextPage": true, "endCursor": "Mg==" },
+      "totalCount": 12
+    }
+  }
+}
+```
+
+**Mutation با خطای دامنه:**
+
+```bash
+curl -s http://localhost:4000/graphql \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"query":"mutation { createPost(input: { title: \"a\", slug: \"x\", body: \"...\" }) { post { id } errors { field message } } }"}'
+```
+
+```json
+{
+  "data": {
+    "createPost": {
+      "post": null,
+      "errors": [{ "field": "title", "message": "عنوان کوتاه است" }]
+    }
+  }
+}
+```
+
+**ایست بازرسی ۱ — N+1:** در Prisma `log: ['query']` را روشن کنید. کوئری `posts { author { name } }` با ۲۰ پست باید **۲** کوئری بزند (یکی posts، یکی `users IN (...)`). اگر ۲۱ کوئری دیدید، DataLoader وصل نیست.
+
+**ایست بازرسی ۲ — loader per-request:** در دو درخواست هم‌زمان با دو کاربر مختلف، نباید داده‌ی کاربر A در کش B بیاید. اگر DataLoader را global ساخته‌اید، همین اتفاق می‌افتد.
+
+**ایست بازرسی ۳ — عمق:** این کوئری را بزنید:
+
+```graphql
+{ posts { edges { node { author { posts { edges { node { author { posts { edges { node { id } } } } } } } } } } } }
+```
+
+باید خطای depth limit ببینید، نه پاسخ کند/سنگین.
+
+**خطای واقعی:**
+
+```json
+{ "errors": [{ "message": "Cannot return null for non-nullable field Post.title." }] }
+```
+
+یعنی resolver برای فیلد non-null مقدار null داده؛ داده یا resolver را اصلاح کنید (یا فیلد را nullable کنید اگر null مجاز است).
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

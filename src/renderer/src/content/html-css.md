@@ -396,6 +396,55 @@ fsa-01-landing-page/
 
 **گام ۱۰ — بازبینی**: Tab زدن، تغییر عرض، Lighthouse، کنتراست.
 
+### اجرای واقعی: از فایل تا صفحه‌ی رندرشده
+
+```bash
+mkdir fsa-01-landing-page && cd fsa-01-landing-page
+touch index.html styles.css
+python3 -m http.server 8080
+# خروجی:
+Serving HTTP on 0.0.0.0 port 8080 (http://0.0.0.0:8080/) ...
+```
+
+مرورگر را روی `http://localhost:8080` باز کنید. اگر این خروجی را نمی‌بینید:
+
+```text
+OSError: [Errno 98] Address already in use
+```
+
+یعنی پورت اشغال است: `python3 -m http.server 8081`.
+
+**ایست بازرسی ۱ — ساختار:** در DevTools → Elements، خروجی `document.querySelectorAll('h1').length` باید دقیقاً `1` باشد و `document.querySelectorAll('main section').length` حداقل ۳.
+
+**ایست بازرسی ۲ — گرید:** در تب Elements کارت‌ها را انتخاب کنید؛ در Styles باید ببینید:
+
+```css
+.features__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: var(--space-6);
+}
+```
+
+در عرض ۱۴۴۰px سه ستون و در ۳۷۵px یک ستون می‌شوید. این را با `Ctrl+Shift+M` (حالت دستگاه) و انتخاب iPhone SE بررسی کنید.
+
+**ایست بازرسی ۳ — فرم:** روی label کلیک کنید؛ فوکوس باید روی input برود. در Console:
+
+```js
+document.querySelector('input[type=email]').labels.length  // 1
+document.querySelectorAll('img:not([alt])').length          // 0
+```
+
+**خروجی Lighthouse** (بخش Accessibility) باید حداقل ۹۵ باشد. اگر کمتر بود، معمولاً یکی از این‌هاست:
+
+| امتیاز | علت | اصلاح |
+| --- | --- | --- |
+| `label` | label بدون `for` یا input بدون `id` | `for="email"` + `id="email"` |
+| `alt` | تصویر تزئینی بدون `alt=""` | `alt=""` برای تزئینی، متن برای معنادار |
+| contrast | رنگ کم‌کنتراست | نسبت ۴.۵:۱ برای متن معمولی |
+
+**تفاوت خروجی با انتظار:** اگر استایل اعمال نشد، در Network تب CSS را ببینید؛ ۴۰۴ یعنی مسیر `styles.css` غلط است. اگر گرید تک‌ستونه ماند، `display:grid` روی والد کارت‌هاست نه روی خود کارت.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

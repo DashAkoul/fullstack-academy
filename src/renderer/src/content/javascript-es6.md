@@ -332,6 +332,87 @@ function render(root, state) {
 
 **گام ۸ — بازبینی:** تب‌زنی سریع باید فقط نتیجه‌ی آخر را نشان دهد؛ Network را ببینید و مطمئن شوید درخواست‌های قبلی `canceled` هستند.
 
+### اجرای واقعی: سه اسکریپت با خروجی مشخص
+
+**۱) closure و debounce** — فایل `demo.mjs`:
+
+```js
+function debounce(fn, delay) {
+  let timer
+  return (...args) => {
+    clearTimeout(timer)
+    timer = setTimeout(() => fn(...args), delay)
+  }
+}
+
+const calls = []
+const search = debounce((q) => calls.push(q), 100)
+search('r'); search('re'); search('react')
+
+setTimeout(() => console.log(calls), 200)
+```
+
+```bash
+node demo.mjs
+# خروجی:
+[ 'react' ]
+```
+
+**۲) async/await و خطا:**
+
+```js
+async function loadUser(name) {
+  const res = await fetch(`https://api.github.com/users/${name}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+try {
+  const user = await loadUser('octocat')
+  console.log(user.login, user.public_repos)
+} catch (err) {
+  console.error('خطا:', err.message)
+}
+```
+
+```bash
+node demo.mjs
+# خروجی واقعی (تعداد مخازن ممکن است تغییر کند):
+octocat 8
+```
+
+اگر اینترنت نباشد:
+
+```text
+خطا: fetch failed
+```
+
+**۳) ماژول‌ها:** دو فایل بسازید و مطمئن شوید import کار می‌کند:
+
+```js
+// api.js
+export const topRepos = (repos, n = 5) =>
+  [...repos].sort((a, b) => b.stargazers_count - a.stargazers_count).slice(0, n)
+
+// main.js
+import { topRepos } from './api.js'
+const repos = [
+  { name: 'a', stargazers_count: 10 },
+  { name: 'b', stargazers_count: 30 },
+  { name: 'c', stargazers_count: 20 }
+]
+console.log(topRepos(repos).map((r) => r.name).join(','))
+```
+
+```bash
+node main.js
+# b,c,a
+```
+
+> اگر `Warning: To load an ES module, set "type": "module"` دیدید، در `package.json` مقدار `"type": "module"` را اضافه کنید یا فایل را با پسوند `.mjs` ذخیره کنید.
+
+**ایست بازرسی در مرورگر:** در Network، هنگام تایپ سریع در جستجو باید فقط **یک** درخواست به `api.github.com` ببینید. اگر چند درخواست دیدید، debounce وصل نشده است.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

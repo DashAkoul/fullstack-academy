@@ -285,6 +285,56 @@ interface Report {
 
 **گام ۸ — تست:** مجوز را رد کنید و مطمئن شوید اپ کرش نمی‌کند؛ در تنظیمات فعال و برگردید.
 
+### اجرای واقعی: مجوز، دوربین و GPS
+
+```bash
+npx expo install expo-image-picker expo-location expo-notifications expo-secure-store
+npx expo run:android
+# > Task :app:installDebug
+# Installed on 1 device.
+# Starting: Intent { cmp=com.acme.reporter/.MainActivity }
+```
+
+**ایست بازرسی ۱ — رد مجوز:** در تنظیمات اپ، دسترسی دوربین را رد کنید و دکمه‌ی عکس را بزنید. باید پیام «برای انتخاب عکس به دسترسی نیاز داریم» را ببینید، نه کرش. سپس در تنظیمات فعال کنید و برگردید؛ دکمه باید کار کند.
+
+**ایست بازرسی ۲ — GPS خاموش:** موقعیت مکانی گوشی را خاموش کنید و «دریافت موقعیت» را بزنید:
+
+```text
+مکان‌یابی خاموش است
+برای ثبت محل خرابی، GPS را روشن کنید.
+```
+
+اگر به‌جای آن یک reject خام دیدید، `hasServicesEnabledAsync` را بررسی نکرده‌اید.
+
+**ایست بازرسی ۳ — SecureStore:** توکن فرضی را ذخیره کنید:
+
+```ts
+await tokenStore.save('test-token')
+console.log(await tokenStore.get())
+# test-token
+```
+
+سپس اپ را حذف/نصب کنید؛ مقدار باید پاک شده باشد (Keychain/Keystore رفتار پلتفرم‌محور دارد). در Android، اگر خطای `Could not encrypt` دیدید، احتمالاً روی شبیه‌ساز بدون lock screen هستید.
+
+**ایست بازرسی ۴ — اعلان:** بعد از اجازه، یک اعلان زمان‌بندی کنید و ساعت گوشی را جلو ببرید:
+
+```text
+Notification: { title: 'یادآوری', body: 'عادت‌های امروز را ثبت کردی؟' }
+```
+
+اگر اعلان نیامد، در Android کانال نساخته‌اید یا `POST_NOTIFICATIONS` (Android 13+) اجازه نداده است.
+
+**خطاهای واقعی رایج:**
+
+| خطا | معنا | اصلاح |
+| --- | --- | --- |
+| `Permission denied` بدون دیالوگ | `canAskAgain=false` | کاربر را به `Linking.openSettings()` ببرید |
+| `Location request failed` | شبیه‌ساز بدون موقعیت | Location را در شبیه‌ساز ست کنید |
+| `Unable to resolve module expo-*` | نصب با npm | `npx expo install` |
+| تصویر پس از ری‌استارت نیست | URI موقت cache | فایل را کپی کنید |
+
+**بررسی متن مجوز:** پس از `npx expo prebuild`، فایل `android/app/src/main/AndroidManifest.xml` باید `ACCESS_FINE_LOCATION` داشته باشد و `ios/*/Info.plist` باید `NSCameraUsageDescription` با متن فارسی داشته باشد. اگر متن عمومی باشد، App Store ممکن است رد کند.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

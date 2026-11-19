@@ -332,6 +332,78 @@ npx create-next-app@latest blog --ts --tailwind --eslint --app --src-dir
 
 **گام ۸ — بررسی بیلد:** `npm run build`؛ ببینید کدام مسیرها Static و کدام Dynamic هستند (`○`/`ƒ`).
 
+### اجرای واقعی: dev، build و بررسی کش
+
+```bash
+npx create-next-app@latest fsa-09-blog --ts --tailwind --eslint --app --src-dir
+cd fsa-09-blog
+npm run dev
+#   ▲ Next.js 15.5.0
+#   - Local:        http://localhost:3000
+#   - Environments: .env.local
+#
+#  ✓ Starting...
+#  ✓ Ready in 2.1s
+```
+
+**build واقعی و جدول مسیرها:**
+
+```bash
+npm run build
+#    ▲ Next.js 15.5.0
+#
+#    Creating an optimized production build ...
+#  ✓ Compiled successfully
+#  ✓ Generating static pages (6/6)
+#
+#  Route (app)                                 Size  First Load JS
+#  ┌ ○ /                                    1.2 kB         106 kB
+#  ├ ○ /_not-found                           ...
+#  ├ ● /blog                                 ...
+#  └ ● /blog/[slug]                          ...
+#
+#  ○  (Static)  prerendered as static content
+#  ●  (SSG)     prerendered as static HTML (uses generateStaticParams)
+#  ƒ  (Dynamic) server-rendered on demand
+```
+
+اگر مسیر `[slug]` با `ƒ` نمایش داده شد نه `●`، `generateStaticParams` را نداشته‌اید یا `fetch` با `cache: 'no-store'` زده‌اید.
+
+**ایست بازرسی ۱ — کش:** در `npm run dev`، دو بار `/blog` را باز کنید. در ترمینال باید فقط یک بار درخواست دیتابیس/فایل ببینید (اگر `fetch` کش‌شده است). برای بازتولید فوری:
+
+```ts
+revalidatePath('/blog')
+```
+
+سپس صفحه را رفرش کنید؛ محتوای جدید باید بیاید.
+
+**ایست بازرسی ۲ — فرم بدون JS:** در Chrome، DevTools → Settings → Debugger → **Disable JavaScript** را فعال کنید. فرم تماس را پر و ارسال کنید؛ باید همان پیام موفقیت را ببینید (Server Action). اگر خطا داد، `action` را به تابع سمت کلاینت وصل کرده‌اید.
+
+**خطای واقعی ۱:**
+
+```text
+Error: Route "/blog/[slug]" used `params.slug`. `params` should be awaited before using its properties.
+```
+
+یعنی `params` را در Next 15 await نکرده‌اید: `const { slug } = await params`.
+
+**خطای واقعی ۲:**
+
+```text
+Error: useActionState is not exported from 'react'
+```
+
+نسخه‌ی React کمتر از 19 است؛ `npm i react@19 react-dom@19` (یا از قالب جدید Next استفاده کنید).
+
+**ایست بازرسی ۳ — امنیت env:** در باندل کلاینت جستجو کنید:
+
+```bash
+grep -r "SESSION_SECRET" .next/static || echo "not leaked"
+# not leaked
+```
+
+اگر پیدا شد، متغیر را بدون `NEXT_PUBLIC_` در یک Client Component خوانده‌اید.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

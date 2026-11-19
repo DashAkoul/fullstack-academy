@@ -324,6 +324,71 @@ volumes: { pgdata: {} }
 
 **گام ۸ — تست:** یک تست برای ایجاد پست و یکی برای یکپارچگی حذف cascade.
 
+### اجرای واقعی: migration، seed و کوئری
+
+```bash
+docker compose up -d db
+# ✔ Container blog-db-1  Started
+
+npx prisma migrate dev --name init
+# Applying migration `20251010120000_init`
+# Your database is now in sync with your schema.
+# ✔ Generated Prisma Client
+
+npx prisma db seed
+# Running seed command `tsx prisma/seed.ts` ...
+# 🌱  The seed command has been executed.
+```
+
+```bash
+psql "$DATABASE_URL" -c "select id, title, published from posts order by id limit 3;"
+#  id |      title      | published
+# ----+-----------------+-----------
+#   1 | اولین پست       | t
+#   2 | پست پیش‌نویس     | f
+# (2 rows)
+```
+
+```bash
+psql "$DATABASE_URL" -c "explain analyze select * from posts where author_id = 1 and published order by created_at desc limit 10;"
+#                                                       QUERY PLAN
+# ----------------------------------------------------------------------------------------------------------------------
+#  Limit  (cost=0.28..8.30 rows=1 width=...) (actual time=0.020..0.022 rows=1 loops=1)
+#    ->  Index Scan using posts_author_id_published_created_at_idx on posts  (actual time=0.012..0.014 rows=1 loops=1)
+#          Index Cond: ((author_id = 1) AND (published = true))
+#  Planning Time: 0.150 ms
+#  Execution Time: 0.040 ms
+```
+
+اگر `Seq Scan` دیدید، ایندکس مرکب/شرط را بررسی کنید.
+
+**ایست بازرسی ۱ — ظرفیت اتمیک:** دو خرید هم‌زمان روی آخرین بلیت بزنید:
+
+```bash
+seq 1 20 | xargs -P 20 -I{} curl -s -X POST localhost:3000/tickets -d '{"eventId":1}'
+```
+
+باید دقیقاً یک موفقیت و بقیه `ظرفیت تکمیل است` باشند. اگر دو بلیت فروخته شد، `updateMany` با شرط `remaining > 0` را در تراکنش استفاده نکرده‌اید.
+
+**ایست بازرسی ۲ — cascade:** یک پست را حذف کنید:
+
+```bash
+psql "$DATABASE_URL" -c "delete from posts where id = 1;"
+psql "$DATABASE_URL" -c "select count(*) from comments where post_id = 1;"
+#  count
+# -------
+#      0
+```
+
+**ایست بازرسی ۳ — env:** `.env` نباید در `git status` باشد؛ `.env.example` باید `DATABASE_URL` داشته باشد.
+
+| خطای واقعی | معنا |
+| --- | --- |
+| `P2002` | unique تکراری → upsert |
+| `P2003` | FK نامعتبر → ترتیب ایجاد |
+| `P2025` | رکورد برای update/delete نیست |
+| `too many connections` | pool → pooler |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

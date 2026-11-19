@@ -1,8 +1,74 @@
-import { Children, isValidElement, useState, type ReactNode } from 'react'
+import { Children, isValidElement, memo, useState, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import json from 'highlight.js/lib/languages/json'
+import bash from 'highlight.js/lib/languages/bash'
+import sql from 'highlight.js/lib/languages/sql'
+import yaml from 'highlight.js/lib/languages/yaml'
+import graphql from 'highlight.js/lib/languages/graphql'
+import dockerfile from 'highlight.js/lib/languages/dockerfile'
+import ini from 'highlight.js/lib/languages/ini'
+import powershell from 'highlight.js/lib/languages/powershell'
+import diff from 'highlight.js/lib/languages/diff'
+import markdown from 'highlight.js/lib/languages/markdown'
+import kotlin from 'highlight.js/lib/languages/kotlin'
+import swift from 'highlight.js/lib/languages/swift'
+import plaintext from 'highlight.js/lib/languages/plaintext'
 import { Check, Copy } from 'lucide-react'
+
+// Only register the grammars used by the curriculum: keeps the renderer small.
+for (const [name, grammar] of Object.entries({
+  javascript,
+  typescript,
+  xml,
+  css,
+  json,
+  bash,
+  sql,
+  yaml,
+  graphql,
+  dockerfile,
+  ini,
+  powershell,
+  diff,
+  markdown,
+  kotlin,
+  swift,
+  plaintext
+})) {
+  hljs.registerLanguage(name, grammar)
+}
+
+const ALIASES: Record<string, string> = {
+  js: 'javascript',
+  jsx: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  html: 'xml',
+  htm: 'xml',
+  svg: 'xml',
+  vue: 'xml',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  yml: 'yaml',
+  gql: 'graphql',
+  docker: 'dockerfile',
+  toml: 'ini',
+  ps1: 'powershell',
+  pwsh: 'powershell',
+  text: 'plaintext',
+  txt: 'plaintext',
+  env: 'plaintext',
+  prisma: 'plaintext'
+}
 
 function textOf(node: ReactNode): string {
   if (node == null || typeof node === 'boolean') return ''
@@ -12,17 +78,14 @@ function textOf(node: ReactNode): string {
   return ''
 }
 
-function languageOf(node: ReactNode): string {
-  if (!isValidElement<{ className?: string }>(node)) return ''
-  const className = node.props.className ?? ''
-  const match = /language-([\w-]+)/.exec(className)
-  return match?.[1] ?? ''
+function highlight(code: string, rawLang: string): string {
+  const lang = ALIASES[rawLang] ?? rawLang
+  if (!hljs.getLanguage(lang)) return hljs.highlight(code, { language: 'plaintext' }).value
+  return hljs.highlight(code, { language: lang }).value
 }
 
-function CodeBlock({ children }: { children?: ReactNode }) {
+function CodeBlock({ code, children }: { code: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
-  const code = textOf(children)
-  const lang = languageOf(Children.toArray(children)[0])
 
   async function copy() {
     try {
@@ -36,7 +99,6 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
   return (
     <div className="code-shell group">
-      {lang && <span className="code-lang">{lang}</span>}
       <button
         onClick={copy}
         className="absolute bottom-2 left-2 z-10 rounded-md border border-white/10 bg-white/10 p-1.5 text-white/60 opacity-60 transition-opacity hover:bg-white/20 hover:text-white hover:opacity-100 focus-visible:opacity-100"
@@ -51,13 +113,39 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 }
 
 const components: Components = {
-  pre: ({ children }) => <pre>{<CodeBlock>{children}</CodeBlock>}</pre>,
+  pre: ({ children }) => {
+    const child = Children.toArray(children)[0]
+    const dataCode = isValidElement<{ 'data-code'?: string }>(child) ? child.props['data-code'] : undefined
+    const code = typeof dataCode === 'string' ? dataCode : textOf(children)
+    return (
+      <pre>
+        <CodeBlock code={code}>{children}</CodeBlock>
+      </pre>
+    )
+  },
+  code: ({ className, children }) => {
+    const lang = /language-([\w-]+)/.exec(className ?? '')?.[1]
+    if (!lang) {
+      return <code className={className}>{children}</code>
+    }
+    const code = String(children).replace(/\n$/, '')
+    return (
+      <code
+        className={`${className ?? ''} hljs`}
+        data-code={code}
+        dir="ltr"
+        dangerouslySetInnerHTML={{ __html: highlight(code, lang) }}
+      />
+    )
+  },
   a: ({ href, children }) => (
     <a
       href={href}
       onClick={(e) => {
         e.preventDefault()
-        if (href?.startsWith('http')) void window.academy.shell.openExternal(href)
+        if (href?.startsWith('https://') || href?.startsWith('http://')) {
+          void window.academy.shell.openExternal(href)
+        }
       }}
       rel="noreferrer"
     >
@@ -66,16 +154,18 @@ const components: Components = {
   )
 }
 
-export function Markdown({ children, className = '' }: { children: string; className?: string }) {
+export const Markdown = memo(function Markdown({
+  children,
+  className = ''
+}: {
+  children: string
+  className?: string
+}) {
   return (
     <div className={`lesson-prose prose prose-slate max-w-none dark:prose-invert ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-        components={components}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {children}
       </ReactMarkdown>
     </div>
   )
-}
+})

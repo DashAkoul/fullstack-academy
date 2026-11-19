@@ -13,6 +13,20 @@ files:
 
 asar: true
 compression: maximum
+npmRebuild: false
+# Keep only the locales the UI actually needs (smaller download, fewer files).
+electronLanguages:
+  - en-US
+  - fa
+# Harden the packaged runtime: no ELECTRON_RUN_AS_NODE, no NODE_OPTIONS,
+# no inspector flags, and only the validated app.asar may be loaded.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  resetAdHocDarwinSignature: true
 artifactName: FullStackAcademy-${version}-${os}-${arch}.${ext}
 
 win:

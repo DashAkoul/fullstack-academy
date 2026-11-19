@@ -6,12 +6,13 @@ import * as storage from '../src/main/storage'
 import { listModels } from '../src/main/ai'
 
 function stubFetch(response: { status: number; body: unknown }) {
-  const fetchMock = vi.fn(async () => ({
-    ok: response.status >= 200 && response.status < 300,
-    status: response.status,
-    json: async () => response.body,
-    text: async () => JSON.stringify(response.body)
-  }))
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify(response.body), {
+        status: response.status,
+        headers: { 'content-type': 'application/json' }
+      })
+  )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }

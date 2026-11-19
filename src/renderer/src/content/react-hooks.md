@@ -269,6 +269,75 @@ const COLUMNS: { id: Status; title: string }[] = [
 
 **گام ۸ — تست:** reducer را با Vitest تست کنید؛ حرکت بین ستون‌ها و حذف.
 
+### اجرای واقعی: از رندر تا تست
+
+```bash
+npm create vite@latest fsa-07-kanban -- --template react-ts
+cd fsa-07-kanban && npm install
+npm run dev
+#   VITE v8.3.8  ready in 250 ms
+#   ➜  Local:   http://localhost:5173/
+```
+
+**ایست بازرسی ۱ — snapshot state:** این کامپوننت را موقتاً اضافه کنید:
+
+```tsx
+function Demo() {
+  const [n, setN] = useState(0)
+  function wrong() {
+    setN(n + 1)
+    setN(n + 1)
+  }
+  function right() {
+    setN((v) => v + 1)
+    setN((v) => v + 1)
+  }
+  return (
+    <div>
+      <p data-testid="n">{n}</p>
+      <button onClick={wrong}>wrong</button>
+      <button onClick={right}>right</button>
+    </div>
+  )
+}
+```
+
+با یک کلیک روی `wrong` عدد **۱** و با `right` عدد **۲** زیاد می‌شود. اگر چنین نیست، نسخه‌ی React را بررسی کنید (این رفتار از React 18 پایدار است).
+
+**ایست بازرسی ۲ — cleanup:** در `useEffect` یک `console.log('mount')` و در cleanup `console.log('cleanup')` بگذارید. با تغییر `id` در Console باید ببینید:
+
+```text
+cleanup
+mount
+```
+
+اگر فقط `mount` می‌بینید، تابع cleanup را برنگردانده‌اید.
+
+**تست reducer با Vitest:**
+
+```bash
+npm i -D vitest
+npx vitest run
+#  ✓ src/tasks.test.ts (4 tests) 12ms
+#
+#  Test Files  1 passed (1)
+#       Tests  4 passed (4)
+#    Start at  ...
+```
+
+اگر تست با `expected [...] to equal [...]` شکست خورد، معمولاً state قبلی را mutate کرده‌اید:
+
+```ts
+// ❌
+state[0].done = true
+return state
+
+// ✅
+return state.map((t) => (t.id === id ? { ...t, done: true } : t))
+```
+
+**ایست بازرسی ۳ — رفرش:** یک وظیفه اضافه کنید، `F5` بزنید؛ باید بماند (localStorage → Application → Local Storage → `kanban.tasks`). اگر خالی شد، `useLocalStorage` را در دو جای مختلف با کلید متفاوت استفاده کرده‌اید یا JSON.parse خطا داده و fallback برگشته است.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

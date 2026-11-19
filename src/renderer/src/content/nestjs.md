@@ -304,6 +304,66 @@ nest g module tasks && nest g controller tasks && nest g service tasks
 
 **گام ۹ — مستندسازی:** `@nestjs/swagger` و `/docs`.
 
+### اجرای واقعی: bootstrap و تست
+
+```bash
+nest new tasks-api --strict
+cd tasks-api
+npm run start:dev
+# [Nest] 12345  - 10/10/2025, 1:00:00 PM     LOG [NestFactory] Starting Nest application...
+# [Nest] 12345  - 10/10/2025, 1:00:00 PM     LOG [InstanceLoader] PrismaModule dependencies initialized
+# [Nest] 12345  - 10/10/2025, 1:00:00 PM     LOG [RoutesResolver] TasksController {/tasks}:
+# [Nest] 12345  - 10/10/2025, 1:00:00 PM     LOG [RouterExplorer] Mapped {/tasks, GET} route
+# [Nest] 12345  - 10/10/2025, 1:00:00 PM     LOG [NestApplication] Nest application successfully started
+```
+
+```bash
+curl -s -X POST http://localhost:3000/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"a"}'
+# {"message":["title must be longer than or equal to 2 characters"],"error":"Bad Request","statusCode":400}
+```
+
+```bash
+curl -s http://localhost:3000/tasks \
+  -H "Authorization: Bearer $TOKEN"
+# [{"id":"...","title":"نوشتن تست","ownerId":"user-1"}]
+```
+
+**ایست بازرسی ۱ — DI:** اگر خطای زیر آمد:
+
+```text
+Nest can't resolve dependencies of the TasksService (?, PrismaService).
+```
+
+یعنی `PrismaModule` در `imports` ماژول نیست یا `PrismaService` ارائه/export نشده است.
+
+**ایست بازرسی ۲ — ValidationPipe:** اگر فیلد `role: "admin"` در بدنه پذیرفته شد، `whitelist: true` را فراموش کرده‌اید. با آن، فیلد ناخواسته حذف می‌شود (یا با `forbidNonWhitelisted` خطای ۴۰۰ می‌گیرید).
+
+**ایست بازرسی ۳ — Guard:** بدون توکن:
+
+```bash
+curl -i http://localhost:3000/tasks
+# HTTP/1.1 401 Unauthorized
+```
+
+اگر ۲۰۰ گرفتید، `@UseGuards` روی کنترلر نیست یا Guard به‌درستی `false` برنمی‌گرداند.
+
+**تست واقعی:**
+
+```bash
+npm run test
+# PASS  src/tasks/tasks.service.spec.ts
+#   TasksService
+#     ✓ فقط وظایف مالک را برمی‌گرداند (8 ms)
+#
+# Test Suites: 1 passed, 1 total
+# Tests:       1 passed, 1 total
+```
+
+اگر تست به DB واقعی وصل شد، provider را با `useValue` جایگزین نکرده‌اید.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

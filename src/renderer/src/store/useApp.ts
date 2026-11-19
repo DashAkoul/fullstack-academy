@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AIProvider } from '@shared/types'
 import { AI_PROVIDERS, DEFAULT_MODELS } from '@shared/types'
-import type { MiniLesson, ReviewResult } from '@shared/review'
+import { MiniLessonSchema, ReviewResultSchema, type MiniLesson, type ReviewResult } from '@shared/review'
 import { lessons, lessonById } from '@/data/curriculum'
 
 export type ThemeMode = 'dark' | 'light'
@@ -96,6 +96,63 @@ function persist(get: () => AppStore): void {
   }, 250)
 }
 
+const isIsoDate = (value: unknown): value is string =>
+  typeof value === 'string' && !Number.isNaN(Date.parse(value))
+
+function sanitizeProgress(raw: unknown): Record<string, LessonProgress> {
+  const out: Record<string, LessonProgress> = {}
+  if (!raw || typeof raw !== 'object') return out
+
+  for (const [lessonId, value] of Object.entries(raw)) {
+    if (!lessonById(lessonId) || !value || typeof value !== 'object') continue
+    const candidate = value as Partial<LessonProgress>
+    const attempts: ReviewAttempt[] = []
+    if (Array.isArray(candidate.attempts)) {
+      for (const item of candidate.attempts.slice(0, 20)) {
+        if (!item || typeof item !== 'object') continue
+        const a = item as Partial<ReviewAttempt>
+        const result = ReviewResultSchema.safeParse(a.result)
+        if (
+          typeof a.id !== 'string' ||
+          !isIsoDate(a.at) ||
+          typeof a.repoUrl !== 'string' ||
+          typeof a.commitSha !== 'string' ||
+          !AI_PROVIDERS.includes(a.provider as AIProvider) ||
+          typeof a.model !== 'string' ||
+          typeof a.passed !== 'boolean' ||
+          !Array.isArray(a.reasons) ||
+          !a.reasons.every((r) => typeof r === 'string') ||
+          !result.success
+        ) {
+          continue
+        }
+        attempts.push({ ...(a as ReviewAttempt), result: result.data })
+      }
+    }
+
+    const miniLessons: MiniLessonRecord[] = []
+    if (Array.isArray(candidate.miniLessons)) {
+      for (const item of candidate.miniLessons.slice(0, 30)) {
+        if (!item || typeof item !== 'object') continue
+        const m = item as Partial<MiniLessonRecord>
+        const parsed = MiniLessonSchema.safeParse(m)
+        if (typeof m.id !== 'string' || !isIsoDate(m.createdAt) || typeof m.lessonId !== 'string' || !parsed.success) {
+          continue
+        }
+        miniLessons.push({ ...(m as MiniLessonRecord), ...parsed.data })
+      }
+    }
+
+    out[lessonId] = {
+      repoUrl: typeof candidate.repoUrl === 'string' ? candidate.repoUrl.slice(0, 500) : undefined,
+      attempts,
+      miniLessons,
+      completedAt: isIsoDate(candidate.completedAt) ? candidate.completedAt : undefined
+    }
+  }
+  return out
+}
+
 function sanitize(raw: unknown): PersistedState | null {
   if (!raw || typeof raw !== 'object') return null
   const candidate = raw as Partial<PersistedState>
@@ -111,14 +168,14 @@ function sanitize(raw: unknown): PersistedState | null {
       ? (saved.provider as AIProvider)
       : defaultSettings.provider,
     models,
-    baseUrl: typeof saved.baseUrl === 'string' ? saved.baseUrl : '',
+    baseUrl: typeof saved.baseUrl === 'string' ? saved.baseUrl.slice(0, 500) : '',
     theme: saved.theme === 'light' ? 'light' : 'dark'
   }
   return {
     version: 1,
     settings,
-    progress: candidate.progress,
-    lastLessonId: candidate.lastLessonId
+    progress: sanitizeProgress(candidate.progress),
+    lastLessonId: typeof candidate.lastLessonId === 'string' ? candidate.lastLessonId : undefined
   }
 }
 

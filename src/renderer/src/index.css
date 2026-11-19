@@ -286,6 +286,10 @@
 .lesson-prose :where(blockquote p)::after {
   content: none;
 }
+.lesson-prose :where(code)::before,
+.lesson-prose :where(code)::after {
+  content: none;
+}
 .lesson-prose :where(ul > li)::marker {
   color: var(--accent);
 }
@@ -328,4 +332,104 @@
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* Syntax highlighting (highlight.js classes; only bundled grammars are used). */
+.hljs {
+  color: #d7e0f2;
+}
+.hljs-comment,
+.hljs-quote {
+  color: #7f8ea8;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-type {
+  color: #c792ea;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute {
+  color: #a5e08a;
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-variable,
+.hljs-template-variable {
+  color: #f6bd6b;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-title.class_,
+.hljs-section,
+.hljs-name {
+  color: #7cc7ff;
+}
+.hljs-attr,
+.hljs-property,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: #ffd580;
+}
+.hljs-built_in,
+.hljs-meta,
+.hljs-tag {
+  color: #ff9ecb;
+}
+.hljs-deletion {
+  color: #ff8b9d;
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}
+[data-theme='light'] .hljs {
+  color: #1f2937;
+}
+[data-theme='light'] .hljs-comment,
+[data-theme='light'] .hljs-quote {
+  color: #6b7280;
+}
+[data-theme='light'] .hljs-keyword,
+[data-theme='light'] .hljs-selector-tag,
+[data-theme='light'] .hljs-literal,
+[data-theme='light'] .hljs-type {
+  color: #7c3aed;
+}
+[data-theme='light'] .hljs-string,
+[data-theme='light'] .hljs-regexp,
+[data-theme='light'] .hljs-addition,
+[data-theme='light'] .hljs-attribute {
+  color: #166534;
+}
+[data-theme='light'] .hljs-number,
+[data-theme='light'] .hljs-symbol,
+[data-theme='light'] .hljs-bullet,
+[data-theme='light'] .hljs-variable,
+[data-theme='light'] .hljs-template-variable {
+  color: #b45309;
+}
+[data-theme='light'] .hljs-title,
+[data-theme='light'] .hljs-title.function_,
+[data-theme='light'] .hljs-title.class_,
+[data-theme='light'] .hljs-section,
+[data-theme='light'] .hljs-name {
+  color: #1d4ed8;
+}
+[data-theme='light'] .hljs-attr,
+[data-theme='light'] .hljs-property,
+[data-theme='light'] .hljs-selector-class,
+[data-theme='light'] .hljs-selector-id {
+  color: #92400e;
+}
+[data-theme='light'] .hljs-built_in,
+[data-theme='light'] .hljs-meta,
+[data-theme='light'] .hljs-tag {
+  color: #9d174d;
 }

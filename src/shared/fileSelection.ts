@@ -17,7 +17,7 @@ const TEXT_EXT = new Set([
 ])
 
 const SPECIAL_NAMES = new Set([
-  'dockerfile', '.dockerignore', '.gitignore', '.gitattributes', '.npmrc', '.nvmrc', 'makefile',
+  'dockerfile', '.dockerignore', '.gitignore', '.gitattributes', '.nvmrc', 'makefile',
   'procfile', '.editorconfig', '.prettierrc', '.eslintrc', 'license'
 ])
 
@@ -52,6 +52,21 @@ function priority(path: string): number {
   if (/\.(ts|tsx|js|jsx|html|css|prisma|graphql)$/.test(lower)) return 3
   if (/config|dockerfile|compose|tsconfig|\.ya?ml$/.test(lower)) return 4
   return 5
+}
+
+const SECRET_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/,
+  /\bsk-[A-Za-z0-9_-]{20,}/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/
+]
+
+/** Best-effort guard so a stray credential is never uploaded to an AI provider. */
+export function looksLikeSecret(text: string): boolean {
+  const sample = text.slice(0, 200_000)
+  return SECRET_PATTERNS.some((re) => re.test(sample))
 }
 
 export function selectReviewFiles<T extends CandidateFile>(files: T[], opts: { maxFiles: number }): T[] {

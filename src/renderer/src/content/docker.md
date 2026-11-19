@@ -224,6 +224,85 @@ trivy image tasks-api:1.0.0
 
 **گام ۹ — مستند:** README با `docker compose up` و متغیرهای لازم.
 
+### اجرای واقعی: build، compose و سلامت
+
+```bash
+docker build -t tasks-api:1.0.0 .
+# [+] Building 18.4s (12/12) FINISHED
+#  => [deps 2/3] COPY package.json package-lock.json ./
+#  => [deps 3/3] RUN npm ci
+#  => [build 4/4] RUN npm run build && npm prune --omit=dev
+#  => [runtime 3/5] COPY --from=build /app/node_modules ./node_modules
+#  => exporting to image
+#  => => naming to docker.io/library/tasks-api:1.0.0
+
+docker images tasks-api
+# REPOSITORY   TAG     IMAGE ID       CREATED         SIZE
+# tasks-api    1.0.0   a1b2c3d4e5f6   5 seconds ago   198MB
+
+docker run --rm -p 3000:3000 --env-file .env tasks-api:1.0.0
+# server listening on 3000
+
+curl -s localhost:3000/health
+# {"ok":true}
+```
+
+**Compose:**
+
+```bash
+docker compose up -d --build
+# ✔ Network tasks_default  Created
+# ✔ Container tasks-db-1   Healthy
+# ✔ Container tasks-api-1  Started
+
+docker compose ps
+# NAME          IMAGE            STATUS                   PORTS
+# tasks-api-1   tasks-api:latest Up 12 seconds (healthy)   0.0.0.0:3000->3000/tcp
+# tasks-db-1    postgres:16      Up 18 seconds (healthy)   0.0.0.0:5432->5432/tcp
+
+docker compose logs -f api
+# api-1  | server listening on 3000
+# api-1  | connected to postgres
+```
+
+**ایست بازرسی ۱ — کش:** یک فایل در `src/` را تغییر دهید و دوباره build کنید. خروجی باید نشان دهد لایه‌ی `npm ci` با `CACHED` رد شده و فقط لایه‌های کد دوباره اجرا شده‌اند. اگر `npm ci` دوباره اجرا شد، `COPY . .` قبل از آن است.
+
+**ایست بازرسی ۲ — non-root:**
+
+```bash
+docker run --rm tasks-api:1.0.0 id
+# uid=1000(node) gid=1000(node) groups=1000(node)
+```
+
+اگر `uid=0(root)` دیدید، `USER node` را جا انداخته‌اید.
+
+**ایست بازرسی ۳ — حجم:** قبل و بعد از multi-stage مقایسه کنید:
+
+```bash
+docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+# tasks-api:dev       1.12GB
+# tasks-api:1.0.0     198MB
+```
+
+**ایست بازرسی ۴ — دیتابیس واقعاً آماده است:** `docker compose up` بدون `condition: service_healthy` معمولاً این خطا را می‌دهد:
+
+```text
+Error: P1001: Can't reach database server at `db:5432`
+```
+
+یعنی API قبل از Postgres بالا آمده؛ healthcheck و `depends_on` را اضافه کنید.
+
+**ایست بازرسی ۵ — سیگنال:**
+
+```bash
+docker stop tasks-api-1
+docker logs tasks-api-1 | tail -3
+# SIGTERM: خاموشی…
+# server closed
+```
+
+اگر هیچ لاگی نیست، `dumb-init` و handler سیگنال را بررسی کنید.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

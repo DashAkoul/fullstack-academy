@@ -264,6 +264,81 @@ npm run test:cov
 
 **گام ۸ — CI:** `npm test -- --coverage` در workflow.
 
+### اجرای واقعی: تست، خطا و پوشش
+
+```bash
+npm test
+#  ✓ src/cart.test.ts (4 tests) 18ms
+#    ✓ calculateTotal (3)
+#      ✓ جمع قیمت × تعداد را برمی‌گرداند
+#      ✓ برای سبد خالی صفر برمی‌گرداند
+#      ✓ موارد جدول را پوشش می‌دهد
+#    ✓ applyCoupon (1)
+#
+#  Test Files  1 passed (1)
+#       Tests  4 passed (4)
+```
+
+**یک تست را عمداً بشکنید** (مثلاً `toBe(250_001)`). خروجی واقعی:
+
+```text
+ FAIL  src/cart.test.ts > calculateTotal > جمع قیمت × تعداد را برمی‌گرداند
+AssertionError: expected 250000 to be 250001 // Object.is equality
+
+- Expected
++ Received
+
+- 250001
++ 250000
+
+ ❯ src/cart.test.ts:12:32
+```
+
+پیام دقیقاً می‌گوید کدام تست، چه انتظاری و چه مقدار واقعی. این را باگ تست یا باگ کد مقایسه کنید.
+
+**پوشش:**
+
+```bash
+npm run test:cov
+#  % Stmts | % Branch | % Funcs | % Lines
+#     91.3 |    83.3 |   100   |   91.3
+```
+
+اگر آستانه را ۸۰ بگذارید و به ۷۹ برسید:
+
+```text
+ERROR: Coverage for branches (79%) does not meet global threshold (80%)
+```
+
+**ایست بازرسی ۱ — ایزولاسیون:** تست‌ها را به‌صورت تصادفی اجرا کنید:
+
+```bash
+npx vitest run --sequence.shuffle
+```
+
+اگر شکست خوردند، state مشترک یا ترتیب وابسته دارید.
+
+**ایست بازرسی ۲ — تست غیرهمگام:** اگر `await` را جا بیندازید، تست سبز می‌شود ولی assertion اجرا نمی‌شود. همیشه `async` + `await` و برای خطا `rejects`:
+
+```ts
+await expect(getPost('missing')).rejects.toThrow('HTTP 404')
+```
+
+**ایست بازرسی ۳ — fake timer:**
+
+```text
+Error: Timed out in 5000ms. See https://vitest.dev/guide/common-errors
+```
+
+یعنی timer واقعی در حال انتظار است؛ `vi.useFakeTimers()` و `advanceTimersByTime` را اضافه کنید.
+
+| خطا | علت | اصلاح |
+| --- | --- | --- |
+| `Cannot find module '@/...'` | alias | `resolve.alias` |
+| `act(...)` warning | به‌روزرسانی خارج از act | `await userEvent` |
+| `toBe` روی آبجکت | مقایسه‌ی مرجع | `toEqual` |
+| تست فقط در CI شکست | TZ/ترتیب | `TZ=UTC` و ایزولاسیون |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

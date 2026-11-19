@@ -1,5 +1,6 @@
 import type { UpdateInfo } from '@shared/types'
 import { APP_REPO, LATEST_RELEASE_API, RELEASES_URL, isNewerVersion } from '@shared/appConfig'
+import { isTrustedReleaseAssetUrl, isTrustedReleasePageUrl } from '@shared/netSafety'
 
 export interface ReleaseAsset {
   name: string
@@ -59,13 +60,19 @@ export async function checkForUpdate(
 
   const release = (await res.json()) as GithubRelease
   const latestVersion = release.tag_name.replace(/^v/i, '')
-  const asset = preferredAsset(release.assets ?? [], platform)
+  const safeAssets = (release.assets ?? []).filter((a) =>
+    isTrustedReleaseAssetUrl(a.browser_download_url, APP_REPO)
+  )
+  const asset = preferredAsset(safeAssets, platform)
+  const releaseUrl = isTrustedReleasePageUrl(release.html_url, APP_REPO)
+    ? release.html_url
+    : `${RELEASES_URL}/tag/${encodeURIComponent(release.tag_name)}`
 
   return {
     currentVersion,
     latestVersion,
     upToDate: !isNewerVersion(latestVersion, currentVersion),
-    releaseUrl: release.html_url || `${RELEASES_URL}/tag/${release.tag_name}`,
+    releaseUrl,
     publishedAt: release.published_at,
     notes: release.body?.slice(0, 4000),
     downloadUrl: asset?.browser_download_url,

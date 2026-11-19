@@ -305,6 +305,65 @@ test('واحد ناشناخته خطا می‌دهد', () => {
 
 **گام ۶ — lockfile و README**؛ تست دستی: `node bin/cli.js 10 km mi` و `npm link` برای اجرای `unit`.
 
+### اجرای واقعی: انتشار و اجرای CLI
+
+```bash
+mkdir fsa-05-unit-cli && cd fsa-05-unit-cli
+npm init -y
+# Wrote to /home/you/fsa-05-unit-cli/package.json
+
+npm pkg set name="unit-convert" version="1.0.0" type="module" license="MIT" \
+  bin.unit="./bin/cli.js" engines.node=">=20"
+npm pkg set scripts.test="node --test" scripts.start="node ./bin/cli.js"
+
+node bin/cli.js 10 km mi
+# 10 km = 6.214 mi
+
+node bin/cli.js 1 km parsec
+# خطا: واحد ناشناخته
+# echo $?
+# 1
+```
+
+**تست:**
+
+```bash
+npm test
+# > unit-convert@1.0.0 test
+# > node --test
+#
+# ✔ کیلومتر به مایل (1.2ms)
+# ✔ واحد ناشناخته خطا می‌دهد (0.4ms)
+# ℹ tests 2
+# ℹ pass 2
+# ℹ fail 0
+```
+
+**بسته‌بندی واقعی:**
+
+```bash
+npm pack --dry-run
+# npm notice 📦  unit-convert@1.0.0
+# npm notice Tarball Contents
+# npm notice 84B  bin/cli.js
+# npm notice 112B package.json
+# npm notice 210B src/convert.js
+# npm notice Tarball Details
+# npm notice name: unit-convert
+# npm notice version: 1.0.0
+# npm notice filename: unit-convert-1.0.0.tgz
+# npm notice total files: 3
+```
+
+اگر `bin/cli.js` در فهرست نبود، `"files"` یا `bin` را اشتباه تنظیم کرده‌اید. اگر `npm link` می‌کنید و دستور `unit` پیدا نمی‌شود:
+
+```bash
+which unit        # باید مسیر global bin را نشان دهد
+npm bin -g        # مسیر را بررسی کنید
+```
+
+**ایست بازرسی:** `npm pack --dry-run` باید **فقط** فایل‌های لازم را نشان دهد؛ `node_modules`، `.env` و تست‌ها (اگر نمی‌خواهید) نباید داخل بسته باشند. `npm ci` در یک پوشه‌ی تازه باید بدون تغییر lockfile اجرا شود.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

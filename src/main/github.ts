@@ -1,6 +1,7 @@
 import type { RepoFile, RepoSnapshot } from '@shared/types'
 import { parseRepoRef } from '@shared/repoRef'
-import { selectReviewFiles } from '@shared/fileSelection'
+import { looksLikeSecret, selectReviewFiles } from '@shared/fileSelection'
+import { readJsonCapped, readTextCapped } from './http'
 
 const API = 'https://api.github.com'
 const RAW = 'https://raw.githubusercontent.com'
@@ -23,7 +24,8 @@ async function gh<T>(path: string): Promise<{ data: T; remaining?: number }> {
   if (!res.ok) {
     let msg = res.statusText
     try {
-      msg = ((await res.json()) as { message?: string }).message ?? msg
+      const { text } = await readTextCapped(res, 2_000)
+      msg = (JSON.parse(text) as { message?: string }).message ?? msg
     } catch {
       /* ignore */
     }
@@ -37,7 +39,7 @@ async function gh<T>(path: string): Promise<{ data: T; remaining?: number }> {
       throw new Error('دسترسی به این مخزن توسط GitHub محدود شده است.')
     throw new Error(`GitHub API ${res.status}: ${msg}`)
   }
-  return { data: (await res.json()) as T, remaining: Number.isNaN(remaining) ? undefined : remaining }
+  return { data: await readJsonCapped<T>(res, 5_000_000), remaining: Number.isNaN(remaining) ? undefined : remaining }
 }
 
 interface TreeEntry {
@@ -60,15 +62,31 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
   return out
 }
 
-async function fetchRaw(owner: string, repo: string, sha: string, path: string): Promise<string | null> {
+function safeRepoPath(path: string): boolean {
+  if (!path || path.length > 500) return false
+  if (path.includes('\\') || path.includes('\x00')) return false
+  const parts = path.split('/')
+  return parts.every((part) => part && part !== '.' && part !== '..')
+}
+
+async function fetchRaw(
+  owner: string,
+  repo: string,
+  sha: string,
+  path: string
+): Promise<{ text: string; truncated: boolean } | null> {
+  if (!safeRepoPath(path)) return null
   // raw.githubusercontent.com is a CDN and does not consume the REST rate limit.
   const url = `${RAW}/${owner}/${repo}/${sha}/${path.split('/').map(encodeURIComponent).join('/')}`
   const res = await fetch(url, {
     headers: { 'User-Agent': UA },
-    signal: AbortSignal.timeout(20_000)
+    signal: AbortSignal.timeout(20_000),
+    redirect: 'follow'
   })
   if (!res.ok) return null
-  return res.text()
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('text/html')) return null
+  return readTextCapped(res, MAX_FILE_BYTES)
 }
 
 export async function fetchRepo(input: string): Promise<RepoSnapshot> {
@@ -104,21 +122,20 @@ export async function fetchRepo(input: string): Promise<RepoSnapshot> {
 
   let total = 0
   const budgeted = selected.filter((e) => {
-    const size = Math.min(e.size ?? 0, MAX_FILE_BYTES)
+    const size = Math.min(e.size ?? MAX_FILE_BYTES, MAX_FILE_BYTES)
     if (total + size > MAX_TOTAL_BYTES) return false
     total += size
     return true
   })
 
   const contents = await mapLimit(budgeted, 6, async (entry) => {
-    const text = await fetchRaw(ref.owner, ref.repo, commit.sha, entry.path)
-    if (text == null) return null
-    const truncated = text.length > MAX_FILE_BYTES
+    const result = await fetchRaw(ref.owner, ref.repo, commit.sha, entry.path)
+    if (result == null || looksLikeSecret(result.text)) return null
     return {
       path: entry.path,
-      content: truncated ? text.slice(0, MAX_FILE_BYTES) : text,
-      size: entry.size ?? text.length,
-      truncated
+      content: result.text,
+      size: entry.size ?? result.text.length,
+      truncated: result.truncated
     } satisfies RepoFile
   })
 
@@ -132,7 +149,7 @@ export async function fetchRepo(input: string): Promise<RepoSnapshot> {
     commitSha: commit.sha,
     commitMessage: commit.commit.message,
     commitDate: commit.commit.committer.date,
-    htmlUrl: repo.html_url,
+    htmlUrl: repo.html_url.startsWith('https://github.com/') ? repo.html_url : `https://github.com/${repo.full_name}`,
     isPrivate: false,
     tree: blobs.map((b) => b.path).slice(0, 500),
     files,

@@ -221,6 +221,89 @@ npx npm-check-updates
 
 **گام ۱۰ — گزارش:** جدول تهدید/کنترل/تست با شواهد.
 
+### اجرای واقعی: حمله و دفاع
+
+**۱) هش رمز را ببینید:**
+
+```bash
+node -e "const a=require('argon2');a.hash('secret123',{type:a.argon2id}).then(console.log)"
+# $argon2id$v=19$m=65536,t=3,p=4$c29tZXNhbHQ$RdescudvJCsgt3ub+b+dWRWJTmaaJObG
+```
+
+هر بار اجرا، salt و هش متفاوت است؛ همین ویژگی rainbow table را بی‌فایده می‌کند. اگر خروجی `5f4dcc3b...` (MD5) بود، رمز را اشتباه هش کرده‌اید.
+
+**۲) کوکی امن را در پاسخ ببینید:**
+
+```bash
+curl -i -X POST localhost:3000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"demo@example.com","password":"secret123"}'
+# HTTP/1.1 200 OK
+# Set-Cookie: session=eyJ...; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800
+```
+
+اگر `HttpOnly` یا `Secure` نیست، در production قابل خواندن با XSS است.
+
+**۳) IDOR را تست کنید:** با توکن کاربر A، فاکتور کاربر B را بخواهید:
+
+```bash
+curl -i localhost:3000/invoices/42 -H "Authorization: Bearer $TOKEN_A"
+# HTTP/1.1 404 Not Found
+
+curl -i localhost:3000/invoices/42 -H "Authorization: Bearer $TOKEN_B"
+# HTTP/1.1 200 OK
+```
+
+اگر برای A هم `200` گرفتید، فیلتر `userId` را جا انداخته‌اید.
+
+**۴) هدرها:**
+
+```bash
+curl -sI localhost:3000 | grep -Ei 'content-security|x-frame|strict-transport|x-content-type'
+# content-security-policy: default-src 'self'; ...
+# x-frame-options: SAMEORIGIN
+# x-content-type-options: nosniff
+```
+
+**۵) rate limit:**
+
+```bash
+for i in $(seq 1 15); do curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:3000/auth/login -d '{}'; done
+# 401
+# 401
+# ...
+# 429
+```
+
+**۶) راز لو رفته:**
+
+```bash
+gitleaks detect --no-git -v
+# Finding:     AWS_SECRET_ACCESS_KEY = "..."
+# Secret:      ...
+# File:        .env
+# RuleID:      aws-access-token
+```
+
+حتی اگر فایل را حذف کنید، در تاریخچه می‌ماند؛ کلید را **بچرخانید** و با `git filter-repo` پاک کنید.
+
+**۷) وابستگی:**
+
+```bash
+npm audit --omit=dev
+# found 0 vulnerabilities
+```
+
+اگر `found 3 vulnerabilities` دیدید، `npm audit fix` را امتحان کنید و برای majorها تغییرات را دستی بررسی کنید.
+
+| نشانه | کنترل |
+| --- | --- |
+| کوکی بدون HttpOnly | بخش ۴ |
+| ۲۰۰ روی منبع دیگران | فیلتر مالکیت |
+| هدر امنیتی ندارد | helmet |
+| ۴۲۹ نمی‌دهد | rate limit روی auth |
+| کلید در git | gitleaks + چرخش |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

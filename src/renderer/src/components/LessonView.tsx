@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import {
   BookOpen,
   CheckCircle2,
@@ -13,8 +13,10 @@ import { lessonById, lessons, moduleById } from '@/data/curriculum'
 import { isLessonUnlocked, useApp, useLessonProgress } from '@/store/useApp'
 import { Markdown } from './Markdown'
 import { ExerciseTab } from './ExerciseTab'
-import { ReviewTab } from './ReviewTab'
-import { Badge } from './ui'
+
+import { Badge, Spinner } from './ui'
+
+const ReviewTab = lazy(() => import('./ReviewTab').then((m) => ({ default: m.ReviewTab })))
 
 type Tab = 'lesson' | 'exercise' | 'review'
 
@@ -31,11 +33,18 @@ export function LessonView({ onOpenSettings }: { onOpenSettings: () => void }) {
   const lesson = lessonById(activeLessonId)
   const lessonProgress = useLessonProgress(activeLessonId)
   const [tab, setTab] = useState<Tab>('lesson')
+  const [seen, setSeen] = useState<Record<Tab, boolean>>({ lesson: true, exercise: false, review: false })
 
   useEffect(() => {
     setTab('lesson')
+    setSeen({ lesson: true, exercise: false, review: false })
     document.getElementById('lesson-scroll')?.scrollTo({ top: 0 })
   }, [activeLessonId])
+
+  useEffect(() => {
+    setSeen((prev) => (prev[tab] ? prev : { ...prev, [tab]: true }))
+    document.getElementById('lesson-scroll')?.scrollTo({ top: 0 })
+  }, [tab])
 
   if (!lesson) return null
 
@@ -119,8 +128,7 @@ export function LessonView({ onOpenSettings }: { onOpenSettings: () => void }) {
       {/* body */}
       <div id="lesson-scroll" className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 py-6">
-          {tab === 'lesson' && (
-            <div className="animate-in">
+          <div className={tab === 'lesson' ? 'animate-in' : 'hidden'}>
               <Markdown>{lesson.content}</Markdown>
 
               <div className="mt-8 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border-soft)] bg-[var(--surface-1)] px-4 py-3">
@@ -144,18 +152,19 @@ export function LessonView({ onOpenSettings }: { onOpenSettings: () => void }) {
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+          </div>
 
-          {tab === 'exercise' && (
-            <div className="animate-in">
+          {seen.exercise && (
+            <div className={tab === 'exercise' ? 'animate-in' : 'hidden'}>
               <ExerciseTab lesson={lesson} onGoReview={() => setTab('review')} />
             </div>
           )}
 
-          {tab === 'review' && (
-            <div className="animate-in">
-              <ReviewTab lesson={lesson} onOpenSettings={onOpenSettings} />
+          {seen.review && (
+            <div className={tab === 'review' ? 'animate-in' : 'hidden'}>
+              <Suspense fallback={<div className="flex justify-center py-10"><Spinner /></div>}>
+                <ReviewTab lesson={lesson} onOpenSettings={onOpenSettings} />
+              </Suspense>
             </div>
           )}
         </div>

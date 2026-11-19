@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { checkForUpdate, preferredAsset, type ReleaseAsset } from '../src/main/update'
 
 const assets: ReleaseAsset[] = [
-  { name: 'FullStackAcademy-1.0.0-windows-portable.exe', browser_download_url: 'https://x/portable.exe' },
-  { name: 'FullStackAcademy-1.0.0-windows-setup.exe', browser_download_url: 'https://x/setup.exe' },
-  { name: 'FullStackAcademy-1.0.0-mac-arm64.dmg', browser_download_url: 'https://x/mac-arm.dmg' },
-  { name: 'FullStackAcademy-1.0.0-mac-x64.zip', browser_download_url: 'https://x/mac-x64.zip' },
-  { name: 'FullStackAcademy-1.0.0-linux-x86_64.AppImage', browser_download_url: 'https://x/app.AppImage' },
-  { name: 'FullStackAcademy-1.0.0-linux-amd64.deb', browser_download_url: 'https://x/app.deb' }
+  { name: 'FullStackAcademy-1.0.0-windows-portable.exe', browser_download_url: 'https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-windows-portable.exe' },
+  { name: 'FullStackAcademy-1.0.0-windows-setup.exe', browser_download_url: 'https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-windows-setup.exe' },
+  { name: 'FullStackAcademy-1.0.0-mac-arm64.dmg', browser_download_url: 'https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-mac-arm64.dmg' },
+  { name: 'FullStackAcademy-1.0.0-mac-x64.zip', browser_download_url: 'https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-mac-x64.zip' },
+  { name: 'FullStackAcademy-1.0.0-linux-x86_64.AppImage', browser_download_url: 'https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-linux-x86_64.AppImage' },
+  { name: 'FullStackAcademy-1.0.0-linux-amd64.deb', browser_download_url: 'https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-linux-amd64.deb' }
 ]
 
 afterEach(() => {
@@ -57,7 +57,7 @@ describe('checkForUpdate', () => {
     const info = await checkForUpdate('1.0.0', 'win32')
     expect(info.latestVersion).toBe('1.1.0')
     expect(info.upToDate).toBe(false)
-    expect(info.downloadUrl).toBe('https://x/setup.exe')
+    expect(info.downloadUrl).toBe('https://github.com/DashAkoul/fullstack-academy/releases/download/v1.0.0/FullStackAcademy-1.0.0-windows-setup.exe')
     expect(info.assetName).toContain('windows-setup')
     expect(info.notes).toBe('یادداشت انتشار')
   })

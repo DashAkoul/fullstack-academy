@@ -288,6 +288,93 @@ Hooks را سبک نگه دارید؛ اگر pre-commit ده ثانیه طول �
 
 **گام ۸ — بازبینی:** `git log --oneline --graph` باید خطی و خوانا باشد.
 
+### اجرای واقعی: یک مخزن از صفر
+
+```bash
+mkdir fsa-04-demo && cd fsa-04-demo
+git init -b main
+# Initialized empty Git repository in /home/you/fsa-04-demo/.git/
+
+git status
+# On branch main
+# No commits yet
+# nothing to commit (create/copy files and use "git add" to track)
+
+printf '# Demo\n' > README.md
+git add README.md
+git commit -m "feat: add readme"
+# [main (root-commit) a1b2c3d] feat: add readme
+#  1 file changed, 1 insertion(+)
+
+printf 'node_modules\n.env\n' > .gitignore
+git add .gitignore
+git commit -m "chore: ignore dependencies and env"
+# [main d4e5f6a] chore: ignore dependencies and env
+#  1 file changed, 2 insertions(+)
+```
+
+هش‌ها (`a1b2c3d`) در پروژه‌ی شما متفاوت‌اند؛ چیز مهم تاریخچه و پیام‌هاست.
+
+**شاخه و merge:**
+
+```bash
+git switch -c feature/badge
+printf '\n![CI](https://example.com/badge.svg)\n' >> README.md
+git add README.md && git commit -m "docs: add CI badge"
+
+git switch main
+git merge --no-ff feature/badge -m "merge: add CI badge"
+# Merge made by the 'ort' strategy.
+#  README.md | 2 ++
+#  1 file changed, 2 insertions(+)
+
+git log --oneline --graph --decorate
+# *   9f8e7d6 (HEAD -> main) merge: add CI badge
+# |\
+# | * 7c6b5a4 (feature/badge) docs: add CI badge
+# |/
+# * d4e5f6a chore: ignore dependencies and env
+# * a1b2c3d feat: add readme
+```
+
+**تعارض واقعی:** دو شاخه یک خط را تغییر دهید:
+
+```bash
+git switch -c feature/a
+printf 'A\n' > note.txt && git add note.txt && git commit -m "feat: a"
+git switch main
+printf 'B\n' > note.txt && git add note.txt && git commit -m "feat: b"
+git merge feature/a
+# CONFLICT (add/add): Merge conflict in note.txt
+# Automatic merge failed; fix conflicts and then commit the result.
+
+cat note.txt
+# <<<<<<< HEAD
+# B
+# =======
+# A
+# >>>>>>> feature/a
+```
+
+فایل را به `A` یا `B` (یا ترکیب) اصلاح کنید، سپس:
+
+```bash
+git add note.txt
+git commit -m "merge: resolve note conflict"
+git status
+# On branch main
+# nothing to commit, working tree clean
+```
+
+**ایست بازرسی:** `git status` باید `nothing to commit, working tree clean` بدهد و `git log --oneline --graph` باید همه‌ی commitها را نشان دهد. اگر فایل حساس (`git status --short` با `.env`) دیدید، **قبل از commit** حذفش کنید:
+
+```bash
+git rm --cached .env
+printf '\n.env\n' >> .gitignore
+```
+
+**اگر `.env` commit شده بود:** حذف فایل کافی نیست؛ راز را بچرخانید و تاریخچه را با `git filter-repo` پاک کنید.
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

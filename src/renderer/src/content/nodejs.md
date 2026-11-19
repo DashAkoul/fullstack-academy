@@ -250,6 +250,75 @@ export function parseLine(line) {
 
 **گام ۷ — تست:** پارسر را با چند خط معتبر/نامعتبر تست کنید.
 
+### اجرای واقعی: تحلیل‌گر لاگ روی فایل واقعی
+
+فایل نمونه بسازید:
+
+```bash
+mkdir -p samples
+cat > samples/access.log <<'EOF'
+1.2.3.4 - - [10/Oct/2025:13:55:36 +0000] "GET /api/users HTTP/1.1" 200 512
+5.6.7.8 - - [10/Oct/2025:13:55:37 +0000] "POST /api/login HTTP/1.1" 401 64
+1.2.3.4 - - [10/Oct/2025:13:56:02 +0000] "GET /api/users HTTP/1.1" 200 512
+9.9.9.9 - - [10/Oct/2025:13:56:10 +0000] "GET /missing HTTP/1.1" 404 128
+EOF
+
+node analyze.js samples/access.log -o report.json --top 2
+# 4 خط
+# 200: 2
+# 401: 1
+# 404: 1
+# پرتکرارترین مسیرها:
+#   /api/users 2
+#   /api/login 1
+# گزارش در report.json نوشته شد
+```
+
+```bash
+cat report.json
+# {
+#   "total": 4,
+#   "status": { "200": 2, "401": 1, "404": 1 },
+#   "topPaths": [
+#     ["/api/users", 2],
+#     ["/api/login", 1]
+#   ]
+# }
+```
+
+**ایست بازرسی ۱ — حافظه:** برای فایل ۱GB، `top` یا Activity Monitor را ببینید؛ حافظه باید تقریباً ثابت بماند (چند ده مگابایت) نه رشد تا گیگابایت. اگر رشد کرد، `readFile` استفاده کرده‌اید.
+
+**ایست بازرسی ۲ — خطای فایل:**
+
+```bash
+node analyze.js missing.log
+# خطا: ENOENT: no such file or directory, open 'missing.log'
+echo $?
+# 1
+```
+
+**ایست بازرسی ۳ — سیگنال:** در حین پردازش `Ctrl+C` بزنید:
+
+```text
+SIGINT: خاموشی…
+```
+
+اگر فرایند فوراً و بدون پیام مرد، handler نداشته‌اید.
+
+**ایست بازرسی ۴ — EventEmitter:** با `analyzer.on('progress', ...)` باید هر ۱۰۰۰ خط یک به‌روزرسانی ببینید. اگر `error` را emit کردید و شنونده نداشتید:
+
+```text
+Error: Unhandled 'error' event
+```
+
+که فرایند را crash می‌کند؛ همیشه `on('error')` بگذارید.
+
+| خطای واقعی | معنا |
+| --- | --- |
+| `ERR_REQUIRE_ESM` | `require` در پروژه‌ی ESM |
+| `EACCES` | مجوز خواندن فایل |
+| `MaxListenersExceededWarning` | شنونده‌ی تکراری در حلقه |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

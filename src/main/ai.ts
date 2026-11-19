@@ -1,10 +1,14 @@
-import type { AICompletionRequest, ModelInfo, ModelListRequest } from '@shared/types'
+import type { AICompletionRequest, ModelInfo } from '@shared/types'
+import { sanitizeCompletionRequest, sanitizeModelListRequest } from '@shared/aiRequest'
 import { getApiKey } from './storage'
+import { readJsonCapped, readTextCapped } from './http'
 
 const TIMEOUT = 180_000
 
+const MAX_API_BYTES = 5_000_000
+
 async function readError(res: Response): Promise<string> {
-  const text = await res.text()
+  const { text } = await readTextCapped(res, 2_000)
   try {
     const j = JSON.parse(text) as { error?: { message?: string } | string; message?: string }
     if (typeof j.error === 'string') return j.error
@@ -19,6 +23,7 @@ async function post(url: string, headers: Record<string, string>, body: unknown)
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body),
+    redirect: 'error',
     signal: AbortSignal.timeout(TIMEOUT)
   })
   if (!res.ok) {
@@ -27,7 +32,7 @@ async function post(url: string, headers: Record<string, string>, body: unknown)
     if (res.status === 429) throw new Error(`محدودیت نرخ/سهمیه سرویس هوش مصنوعی (429): ${msg}`)
     throw new Error(`خطای سرویس هوش مصنوعی (${res.status}): ${msg}`)
   }
-  return res.json()
+  return readJsonCapped<unknown>(res, MAX_API_BYTES)
 }
 
 async function gemini(key: string, r: AICompletionRequest): Promise<string> {
@@ -76,7 +81,8 @@ async function anthropic(key: string, r: AICompletionRequest): Promise<string> {
   return text
 }
 
-export async function complete(r: AICompletionRequest): Promise<string> {
+export async function complete(input: unknown): Promise<string> {
+  const r = sanitizeCompletionRequest(input)
   const key = await getApiKey(r.provider)
   if (!key) throw new Error('کلید API برای این سرویس ثبت نشده است. به تنظیمات بروید.')
   if (!r.model.trim()) throw new Error('نام مدل مشخص نشده است.')
@@ -126,6 +132,7 @@ async function listOpenAI(key: string, baseUrl?: string): Promise<ModelInfo[]> {
   const base = (baseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '')
   const res = await fetch(`${base}/models`, {
     headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
+    redirect: 'error',
     signal: AbortSignal.timeout(30_000)
   })
   if (!res.ok) throw new Error(await readError(res))
@@ -174,7 +181,8 @@ async function listAnthropic(key: string): Promise<ModelInfo[]> {
   return models
 }
 
-export async function listModels({ provider, baseUrl }: ModelListRequest): Promise<ModelInfo[]> {
+export async function listModels(input: unknown): Promise<ModelInfo[]> {
+  const { provider, baseUrl } = sanitizeModelListRequest(input)
   const key = await getApiKey(provider)
   if (!key) throw new Error('برای دریافت لیست مدل‌ها ابتدا کلید API را ذخیره کنید.')
   switch (provider) {

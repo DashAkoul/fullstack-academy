@@ -328,6 +328,84 @@ const byCategory = groupBy(cart.items, (i) => i.product.category)
 
 **گام ۵ — تست**: با Vitest یا حتی `node --test`؛ موارد مرزی: سبد خالی، quantity صفر، تخفیف ۱۲۰٪، تخفیف بیشتر از جمع.
 
+### اجرای واقعی: کامپایلر چه می‌گوید؟
+
+پروژه‌ی کوچک بسازید:
+
+```bash
+mkdir fsa-03-demo && cd fsa-03-demo
+npm init -y
+npm i -D typescript
+npx tsc --init --strict
+```
+
+فایل `src/cart.ts` را با این کد اشتباه بنویسید:
+
+```ts
+type Cart = { items: readonly string[] }
+const cart: Cart = { items: [] }
+cart.items.push('book')
+```
+
+```bash
+npx tsc --noEmit
+# خروجی واقعی:
+src/cart.ts(3,12): error TS2339: Property 'push' does not exist on type 'readonly string[]'.
+```
+
+پیام دقیقاً می‌گوید **چه چیزی** و **کجا**. اصلاح immutable:
+
+```ts
+type Cart = { items: readonly string[] }
+const cart: Cart = { items: [] }
+const next: Cart = { ...cart, items: [...cart.items, 'book'] }
+```
+
+```bash
+npx tsc --noEmit && echo OK
+# OK
+```
+
+**بررسی exhaustive بودن union:**
+
+```ts
+type Discount =
+  | { kind: 'percent'; value: number }
+  | { kind: 'fixed'; value: number }
+  | { kind: 'bogo'; buy: number; free: number }
+
+function label(d: Discount): string {
+  switch (d.kind) {
+    case 'percent': return `${d.value}%`
+    case 'fixed': return `${d.value} تومان`
+  }
+}
+```
+
+```bash
+npx tsc --noEmit
+# src/discount.ts(9,5): error TS2366: Function lacks ending return statement
+# and return type does not include 'undefined'.
+```
+
+چرا؟ چون حالت `bogo` پوشش داده نشده. این همان چیزی است که `never` را الزامی می‌کند:
+
+```ts
+default: {
+  const never: never = d
+  return never
+}
+```
+
+**ایست بازرسی:** `npx tsc --noEmit` باید **هیچ خروجی‌ای** نداشته باشد. هر خط خروجی یک خطای واقعی است؛ آن را نادیده نگیرید و `any` اضافه نکنید.
+
+| خطا | معنا | راه‌حل |
+| --- | --- | --- |
+| `TS2339` | پراپرتی روی تایپ نیست | تایپ را درست کنید یا narrow کنید |
+| `TS2345` | آرگومان ناسازگار | امضای تابع/نوع ورودی |
+| `TS18048` | ممکن است undefined باشد | بررسی `if` یا مقدار پیش‌فرض |
+| `TS2322` | نوع قابل انتساب نیست | اتحاد/جنریک را بررسی کنید |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

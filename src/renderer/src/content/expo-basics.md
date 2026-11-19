@@ -287,6 +287,62 @@ const id = Crypto.randomUUID()
 
 **گام ۸ — SafeArea و KeyboardAvoidingView** و تست در هر دو پلتفرم.
 
+### اجرای واقعی: از QR تا گوشی
+
+```bash
+npx create-expo-app@latest habit-tracker --template default
+cd habit-tracker
+npx expo start
+# Starting Metro Bundler
+#
+# › Metro waiting on exp://192.168.1.23:8081
+# › Scan the QR code above with Expo Go (Android) or the Camera app (iOS)
+#
+# › Press a │ open Android
+# › Press i │ open iOS simulator
+# › Press w │ open web
+```
+
+اگر این خطا آمد:
+
+```text
+CommandError: No development build (com.acme.habits) for this project is installed.
+```
+
+یعنی پروژه به development build نیاز دارد (کتابخانه‌ی بومی اضافه کرده‌اید) یا باید `npx expo run:android` بزنید؛ Expo Go برای این پروژه کافی نیست.
+
+**ایست بازرسی ۱ — متن بیرون Text:** اگر این خطا را دیدید:
+
+```text
+Error: Text strings must be rendered within a <Text> component.
+```
+
+یک رشته‌ی خام داخل `<View>` دارید. آن را داخل `<Text>` ببرید.
+
+**ایست بازرسی ۲ — ذخیره‌سازی:** یک عادت اضافه کنید و در ترمینال Metro لاگ بگذارید:
+
+```ts
+console.log('saved', await AsyncStorage.getItem('habits-v1'))
+```
+
+بعد از اضافه کردن باید ببینید:
+
+```text
+saved [{"id":"...","title":"ورزش","streak":0,"lastDone":null}]
+```
+
+اپ را کامل ببندید و باز کنید؛ لیست باید همان باشد. اگر نیست، `loadHabits` را در `useEffect` صدا نزده‌اید یا خطای JSON را بی‌صدا رد می‌کنید.
+
+**ایست بازرسی ۳ — FlatList:** در `renderItem` یک `console.log(item.id)` بگذارید. با ۱۰۰ آیتم، در ابتدا باید فقط حدود ۱۰ شناسه لاگ شود و با اسکرول بقیه اضافه شوند. اگر همه‌ی ۱۰۰ مورد یک‌جا لاگ شد، از `ScrollView` استفاده کرده‌اید.
+
+**ایست بازرسی ۴ — Safe Area:** در گوشی با notch، هدر نباید زیر نوار وضعیت برود. در Android، `edges={['top']}` را امتحان کنید و تفاوت را ببینید.
+
+| خطای واقعی | معنا | اصلاح |
+| --- | --- | --- |
+| `Unable to resolve module @react-native-async-storage/async-storage` | نصب نشده/کش | `npx expo install ...` و `npx expo start -c` |
+| `Invariant Violation: View config getter...` | نسخه‌ی ناسازگار | `npx expo install --fix` |
+| `Network request failed` | گوشی و کامپیوتر در شبکه‌ی متفاوت | یک Wi-Fi یا `--tunnel` |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |

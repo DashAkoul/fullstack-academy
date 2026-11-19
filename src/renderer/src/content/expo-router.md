@@ -253,6 +253,57 @@ app/
 
 **گام ۸ — not-found:** لینک بازگشت به منو.
 
+### اجرای واقعی: مسیرها و Deep Link
+
+```bash
+npx expo start
+# › Metro waiting on exp://192.168.1.23:8081
+# › Press a │ open Android
+```
+
+**ایست بازرسی ۱ — تب‌ها:** پس از باز شدن، باید سه تب «منو»، «سفارش‌ها» و «پروفایل» ببینید. اگر یک تب چهارم به نام فایل اضافه ظاهر شد، آن فایل را در `(tabs)` گذاشته‌اید ولی `Tabs.Screen` با `href: null` تعریف نکرده‌اید.
+
+**ایست بازرسی ۲ — پارامتر:** روی یک غذا بزنید؛ در Metro لاگ کنید:
+
+```ts
+console.log('id =', id, typeof id)
+# id = 12 string
+```
+
+اگر `undefined` است، نام فایل `[id].tsx` نیست یا `useLocalSearchParams<{ id: string }>()` را در کامپوننت اشتباه صدا زده‌اید.
+
+**Deep Link واقعی:**
+
+```bash
+npx uri-scheme open "menufast://menu/12" --android
+# Opening URI: menufast://menu/12
+```
+
+باید مستقیم صفحه‌ی غذای ۱۲ باز شود و دکمه‌ی back به منو برگردد. اگر اپ باز نشد:
+
+```text
+Error: No activity found to handle Intent
+```
+
+`scheme` در `app.json` ثبت نشده یا بعد از تغییر، بیلد بومی را دوباره نساخته‌اید (`npx expo run:android`).
+
+**ایست بازرسی ۳ — Redirect:** بدون ورود به `/profile` بروید (از طریق Deep Link `menufast://profile`). باید به `/login` هدایت شوید و در نوار بالای صفحه‌ی login، دکمه‌ی back نباید به profile برگردد (چون `replace` استفاده شده).
+
+**خطای واقعی:**
+
+```text
+Error: Attempted to navigate before mounting the Root Layout component.
+```
+
+یعنی `router.push` قبل از آماده شدن layout صدا زده شده؛ آن را داخل `useEffect` یا پس از `useRootNavigationState()` بگذارید.
+
+| مشکل | بررسی |
+| --- | --- |
+| تب اضافی | `href: null` |
+| پارامتر رشته‌ای | `Number(id)` و اعتبارسنجی |
+| مودال تمام‌صفحه | مودال را در Stack ریشه تعریف کنید |
+| back به login | `router.replace` |
+
 ### نگاشت به معیارهای پذیرش
 
 | معیار | کجای درس |
